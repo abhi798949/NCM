@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Device Management - NCM</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <style>
+    :root {
+      --accent: #4a90e2;
+      --bg-from: #667eea;
+      --bg-to: #764ba2;
+    }
+    body {
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, var(--bg-from) 0%, var(--bg-to) 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container-fluid {
+      max-width: 1400px;
+    }
+    .app-header {
+      background: linear-gradient(90deg, var(--accent), #357abd);
+      color: #fff;
+      padding: 15px 20px;
+      border-radius: 8px 8px 0 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .logo {
+      background: #fff;
+      color: var(--accent);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-weight: 700;
+      margin-right: 12px;
+    }
+    .content-card {
+      background: white;
+      border-radius: 0 0 8px 8px;
+      box-shadow: 0 8px 26px rgba(0,0,0,0.18);
+      padding: 24px;
+    }
+    .device-card {
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+      transition: all 0.3s ease;
+    }
+    .device-card:hover {
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      transform: translateY(-2px);
+    }
+    .status-badge {
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 12px;
+    }
+    .status-online {
+      background: #d4edda;
+      color: #155724;
+    }
+    .status-offline {
+      background: #f8d7da;
+      color: #721c24;
+    }
+    .btn-action {
+      font-size: 13px;
+      padding: 6px 12px;
+    }
+    .modal-header {
+      background: linear-gradient(90deg, var(--accent), #357abd);
+      color: white;
+    }
+    .form-label {
+      font-weight: 600;
+      color: #495057;
+    }
+    .ping-status {
+      display: inline-block;
+      margin-left: 8px;
+    }
+    .spinner-small {
+      width: 14px;
+      height: 14px;
+      border-width: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container-fluid">
+    <div class="app-header">
+      <div style="display: flex; align-items: center;">
+        <div class="logo">NCM</div>
+        <div>
+          <strong>Device Management</strong>
+          <div style="font-size: 12px; opacity: 0.9;">Manage Network Devices</div>
+        </div>
+      </div>
+      <div>
+        <a href="{{ url_for('index') }}" class="btn btn-light btn-sm">
+          <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
+        </a>
+      </div>
+    </div>
+
+    <div class="content-card">
+      <!-- Header with Add Button -->
+      <div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h4 class="mb-1">Network Devices</h4>
+        <p class="text-muted mb-0" id="deviceCount">Loading devices...</p>
+    </div>
+    <div class="btn-group">
+        <button class="btn btn-success" onclick="exportTemplate()">
+            <i class="fas fa-download me-2"></i>Export Template
+        </button>
+        <button class="btn btn-info" onclick="showImportModal()">
+            <i class="fas fa-upload me-2"></i>Import Template
+        </button>
+        <button class="btn btn-primary" onclick="showAddDeviceModal()">
+            <i class="fas fa-plus me-2"></i>Add New Device
+        </button>
+    </div>
+</div>
+
+      <!-- Search and Filter -->
+      <div class="row mb-3">
+        <div class="col-md-6">
+          <input type="text" id="searchInput" class="form-control" placeholder="Search devices...">
+        </div>
+        <div class="col-md-3">
+          <select id="vendorFilter" class="form-select">
+            <option value="">All Vendors</option>
+            <option value="cisco">Cisco</option>
+            <option value="juniper">Juniper</option>
+            <option value="arista">Arista</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <select id="typeFilter" class="form-select">
+            <option value="">All Types</option>
+            <option value="cisco_ios">Cisco IOS</option>
+            <option value="cisco_xr">Cisco XR</option>
+            <option value="juniper_junos">Juniper Junos</option>
+            <option value="arista_eos">Arista EOS</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Devices List -->
+      <div id="devicesList">
+        <div class="text-center py-5">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+          <p class="mt-3">Loading devices...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add/Edit Device Modal -->
+  <div class="modal fade" id="deviceModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="modalTitle">Add New Device</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="deviceForm">
+            <div class="row">
+              <!-- Device Name -->
+              <div class="col-md-6 mb-3">
+                <label class="form-label">Device Name *</label>
+                <input type="text" class="form-control" id="deviceName" required>
+              </div>
+
+              <!-- IP Address -->
+              <div class="col-md-6 mb-3">
+                <label class="form-label">IP Address *</label>
+                <div class="input-group">
+                  <input type="text" class="form-control" id="deviceIp" required pattern="^(\d{1,3}\.){3}\d{1,3}$">
+                  <button class="btn btn-outline-secondary" type="button" onclick="testConnection()">
+                    <i class="fas fa-network-wired"></i> Test
+                  </button>
+                </div>
+                <div id="pingStatus" class="mt-1"></div>
+              </div>
+
+              <!-- Device Type -->
+              <div class="col-md-6 mb-3">
+                <label class="form-label">Device Type *</label>
+                <select class="form-select" id="deviceType" required>
+                  <option value="">Select Type</option>
+                  <option value="cisco_ios">Cisco IOS</option>
+                  <option value="cisco_xr">Cisco XR</option>
+                  <option value="cisco_xe">Cisco IOS-XE</option>
+                  <option value="juniper_junos">Juniper Junos</option>
+                  <option value="arista_eos">Arista EOS</option>
+                </select>
+              </div>
+
+              <!-- Vendor -->
+              <div class="col-md-6 mb-3">
+                <label class="form-label">Vendor *</label>
+                <select class="form-select" id="deviceVendor" required>
+                  <option value="">Select Vendor</option>
+                  <option value="cisco">Cisco</option>
+                  <option value="juniper">Juniper</option>
+                  <option value="arista">Arista</option>
+                </select>
+              </div>
+
+              <!-- Username -->
+              <div class="col-md-6 mb-3">
+                <label class="form-label">Username *</label>
+                <input type="text" class="form-control" id="deviceUsername" required>
+              </div>
+
+              <!-- Password -->
+              <div class="col-md-6 mb-3">
+                <label class="form-label">Password *</label>
+                <input type="password" class="form-control" id="devicePassword" required>
+              </div>
+
+              <!-- SSH Port -->
+              <div class="col-md-4 mb-3">
+                <label class="form-label">SSH Port</label>
+                <input type="number" class="form-control" id="devicePort" value="22">
+              </div>
+
+              <!-- SNMP Community -->
+              <div class="col-md-4 mb-3">
+                <label class="form-label">SNMP Community</label>
+                <input type="text" class="form-control" id="snmpCommunity" value="public">
+              </div>
+
+              <!-- SNMP Port -->
+              <div class="col-md-4 mb-3">
+                <label class="form-label">SNMP Port</label>
+                <input type="number" class="form-control" id="snmpPort" value="161">
+              </div>
+
+              <!-- NETCONF Disabled -->
+              <div class="col-12 mb-3">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="disableNetconf">
+                  <label class="form-check-label" for="disableNetconf">
+                    Disable NETCONF (use SSH only)
+                  </label>
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" onclick="saveDevice()">
+            <i class="fas fa-save me-2"></i>Save Device
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/js/bootstrap.bundle.min.js"></script>
+  <script>
+    let devices = [];
+    let editingDevice = null;
+
+    // Load devices on page load
+    document.addEventListener('DOMContentLoaded', () => {
+      loadDevices();
+      
+      // Search functionality
+      document.getElementById('searchInput').addEventListener('input', filterDevices);
+      document.getElementById('vendorFilter').addEventListener('change', filterDevices);
+      document.getElementById('typeFilter').addEventListener('change', filterDevices);
+    });
+
+    async function loadDevices() {
+      try {
+        const res = await fetch('/api/devices');
+        const data = await res.json();
+        
+        if (data.success) {
+          devices = data.devices;
+          renderDevices(devices);
+          updateDeviceCount();
+        } else {
+          showError('Failed to load devices: ' + data.error);
+        }
+      } catch (err) {
+        showError('Error loading devices: ' + err.message);
+      }
+    }
+
+    function renderDevices(deviceList) {
+      const container = document.getElementById('devicesList');
+      
+      if (deviceList.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-5">
+            <i class="fas fa-network-wired fa-3x text-muted mb-3"></i>
+            <p class="text-muted">No devices found. Add your first device to get started.</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = deviceList.map(device => `
+        <div class="device-card">
+          <div class="row align-items-center">
+            <div class="col-md-3">
+              <h6 class="mb-1">${escapeHtml(device.name)}</h6>
+              <small class="text-muted">${escapeHtml(device.ip)}</small>
+            </div>
+            <div class="col-md-2">
+              <small class="text-muted d-block">Type</small>
+              <span class="badge bg-secondary">${escapeHtml(device.device_type)}</span>
+            </div>
+            <div class="col-md-2">
+              <small class="text-muted d-block">Vendor</small>
+              <strong>${escapeHtml(device.vendor)}</strong>
+            </div>
+            <div class="col-md-2">
+              <small class="text-muted d-block">SSH Port</small>
+              <strong>${device.port}</strong>
+            </div>
+            <div class="col-md-3 text-end">
+              <button class="btn btn-sm btn-outline-primary btn-action" onclick="testDeviceNow('${escapeHtml(device.ip)}')">
+                <i class="fas fa-network-wired"></i> Test
+              </button>
+              <button class="btn btn-sm btn-warning btn-action" onclick="editDevice('${escapeHtml(device.name)}')">
+                <i class="fas fa-edit"></i> Edit
+              </button>
+              <button class="btn btn-sm btn-danger btn-action" onclick="deleteDevice('${escapeHtml(device.name)}')">
+                <i class="fas fa-trash"></i> Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function filterDevices() {
+      const search = document.getElementById('searchInput').value.toLowerCase();
+      const vendor = document.getElementById('vendorFilter').value;
+      const type = document.getElementById('typeFilter').value;
+
+      const filtered = devices.filter(device => {
+        const matchSearch = device.name.toLowerCase().includes(search) || 
+                           device.ip.includes(search);
+        const matchVendor = !vendor || device.vendor === vendor;
+        const matchType = !type || device.device_type === type;
+        
+        return matchSearch && matchVendor && matchType;
+      });
+
+      renderDevices(filtered);
+      updateDeviceCount(filtered.length);
+    }
+
+    function updateDeviceCount(count) {
+      const total = count !== undefined ? count : devices.length;
+      document.getElementById('deviceCount').textContent = `${total} device(s) found`;
+    }
+
+    function showAddDeviceModal() {
+      editingDevice = null;
+      document.getElementById('modalTitle').textContent = 'Add New Device';
+      document.getElementById('deviceForm').reset();
+      document.getElementById('pingStatus').innerHTML = '';
+      
+      const modal = new bootstrap.Modal(document.getElementById('deviceModal'));
+      modal.show();
+    }
+
+    function editDevice(deviceName) {
+      editingDevice = devices.find(d => d.name === deviceName);
+      if (!editingDevice) return;
+
+      document.getElementById('modalTitle').textContent = 'Edit Device';
+      document.getElementById('deviceName').value = editingDevice.name;
+      document.getElementById('deviceIp').value = editingDevice.ip;
+      document.getElementById('deviceType').value = editingDevice.device_type;
+      document.getElementById('deviceVendor').value = editingDevice.vendor;
+      document.getElementById('deviceUsername').value = editingDevice.username;
+      document.getElementById('devicePassword').value = editingDevice.password;
+      document.getElementById('devicePort').value = editingDevice.port;
+      document.getElementById('snmpCommunity').value = editingDevice.snmp_community;
+      document.getElementById('snmpPort').value = editingDevice.snmp_port;
+      document.getElementById('disableNetconf').checked = editingDevice.disable_netconf || false;
+
+      const modal = new bootstrap.Modal(document.getElementById('deviceModal'));
+      modal.show();
+    }
+
+    async function saveDevice() {
+      const formData = {
+        name: document.getElementById('deviceName').value.trim(),
+        ip: document.getElementById('deviceIp').value.trim(),
+        device_type: document.getElementById('deviceType').value,
+        vendor: document.getElementById('deviceVendor').value,
+        username: document.getElementById('deviceUsername').value.trim(),
+        password: document.getElementById('devicePassword').value,
+        port: parseInt(document.getElementById('devicePort').value),
+        snmp_community: document.getElementById('snmpCommunity').value.trim(),
+        snmp_port: parseInt(document.getElementById('snmpPort').value),
+        disable_netconf: document.getElementById('disableNetconf').checked
+      };
+
+      // Validate
+      if (!formData.name || !formData.ip || !formData.device_type || !formData.vendor || 
+          !formData.username || !formData.password) {
+        alert('Please fill all required fields');
+        return;
+      }
+
+      try {
+        const url = editingDevice ? `/api/devices/edit/${editingDevice.name}` : '/api/devices/add';
+        const method = editingDevice ? 'PUT' : 'POST';
+
+        const res = await fetch(url, {
+          method: method,
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(formData)
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          const modal = bootstrap.Modal.getInstance(document.getElementById('deviceModal'));
+          modal.hide();
+          
+          showSuccess(data.message);
+          loadDevices();
+        } else {
+          alert('Error: ' + data.error);
+        }
+      } catch (err) {
+        alert('Error saving device: ' + err.message);
+      }
+    }
+
+    async function deleteDevice(deviceName) {
+      if (!confirm(`Are you sure you want to delete device "${deviceName}"?`)) {
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/devices/delete/${encodeURIComponent(deviceName)}`, {
+          method: 'DELETE'
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          showSuccess(data.message);
+          loadDevices();
+        } else {
+          alert('Error: ' + data.error);
+        }
+      } catch (err) {
+        alert('Error deleting device: ' + err.message);
+      }
+    }
+
+    async function testConnection() {
+      const ip = document.getElementById('deviceIp').value.trim();
+      if (!ip) {
+        alert('Please enter an IP address');
+        return;
+      }
+
+      const statusDiv = document.getElementById('pingStatus');
+      statusDiv.innerHTML = '<div class="spinner-border spinner-small text-primary" role="status"></div> Testing...';
+
+      try {
+        const res = await fetch(`/api/devices/test/${encodeURIComponent(ip)}`);
+        const data = await res.json();
+
+        if (data.success) {
+          statusDiv.innerHTML = `<span class="text-success"><i class="fas fa-check-circle"></i> Reachable (${data.latency})</span>`;
+        } else {
+          statusDiv.innerHTML = `<span class="text-danger"><i class="fas fa-times-circle"></i> ${data.message}</span>`;
+        }
+      } catch (err) {
+        statusDiv.innerHTML = `<span class="text-danger"><i class="fas fa-times-circle"></i> Error: ${err.message}</span>`;
+      }
+    }
+
+    async function testDeviceNow(ip) {
+      try {
+        const res = await fetch(`/api/devices/test/${encodeURIComponent(ip)}`);
+        const data = await res.json();
+
+        if (data.success) {
+          showSuccess(`Device ${ip} is reachable (${data.latency})`);
+        } else {
+          alert(`Device ${ip} is unreachable: ${data.message}`);
+        }
+      } catch (err) {
+        alert(`Error testing device: ${err.message}`);
+      }
+    }
+
+    function showSuccess(message) {
+      const alert = document.createElement('div');
+      alert.className = 'alert alert-success alert-dismissible fade show position-fixed';
+      alert.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 400px;';
+      alert.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      `;
+      document.body.appendChild(alert);
+      setTimeout(() => alert.remove(), 3000);
+    }
+
+    function showError(message) {
+      const alert = document.createElement('div');
+      alert.className = 'alert alert-danger alert-dismissible fade show position-fixed';
+      alert.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 400px;';
+      alert.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      `;
+      document.body.appendChild(alert);
+      setTimeout(() => alert.remove(), 5000);
+    }
+
+    function escapeHtml(text) {
+      const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+      };
+      return String(text).replace(/[&<>"']/g, m => map[m]);
+    }
+
+    // Import/Export Template Functions
+function exportTemplate() {
+    try {
+        // Create CSV content with all device fields
+        const headers = [
+            'name', 'ip', 'device_type', 'vendor', 'username', 'password',
+            'port', 'snmp_community', 'snmp_port', 'disable_netconf'
+        ];
+        
+        let csv = headers.join(',') + '\n';
+        
+        // Add current devices
+        devices.forEach(device => {
+            const row = [
+                device.name || '',
+                device.ip || '',
+                device.device_type || '',
+                device.vendor || '',
+                device.username || '',
+                device.password || '',
+                device.port || '22',
+                device.snmp_community || 'public',
+                device.snmp_port || '161',
+                device.disable_netconf || 'false'
+            ];
+            csv += row.map(field => `"${field}"`).join(',') + '\n';
+        });
+        
+        // Download CSV
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `devices_export_${new Date().getTime()}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        showSuccess('Template exported successfully');
+    } catch (err) {
+        alert('Export failed: ' + err.message);
+    }
+}
+
+function downloadSampleTemplate() {
+    const headers = [
+        'name', 'ip', 'device_type', 'vendor', 'username', 'password',
+        'port', 'snmp_community', 'snmp_port', 'disable_netconf'
+    ];
+    
+    const sample = [
+        'Router1', '192.168.1.1', 'cisco_xr', 'cisco', 'admin', 'password123',
+        '22', 'public', '161', 'false'
+    ];
+    
+    let csv = headers.join(',') + '\n';
+    csv += sample.map(field => `"${field}"`).join(',') + '\n';
+    
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'device_template_sample.csv');
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function showImportModal() {
+    const modal = new bootstrap.Modal(document.getElementById('importModal'));
+    modal.show();
+    
+    // Add file change listener
+    document.getElementById('importFile').addEventListener('change', previewImportFile);
+}
+
+function previewImportFile(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+        const content = e.target.result;
+        const lines = content.split('\n').filter(line => line.trim());
+        
+        if (lines.length < 2) {
+            alert('Invalid file: Must contain headers and at least one data row');
+            return;
+        }
+        
+        // Show preview
+        const preview = document.getElementById('importPreview');
+        const previewContent = document.getElementById('previewContent');
+        
+        let html = '<table class="table table-sm"><thead><tr>';
+        
+        const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
+        headers.forEach(h => html += `<th>${h}</th>`);
+        html += '</tr></thead><tbody>';
+        
+        // Show first 5 rows
+        for (let i = 1; i < Math.min(6, lines.length); i++) {
+            const cells = lines[i].split(',').map(c => c.replace(/"/g, '').trim());
+            html += '<tr>';
+            cells.forEach(c => html += `<td>${escapeHtml(c)}</td>`);
+            html += '</tr>';
+        }
+        
+        if (lines.length > 6) {
+            html += `<tr><td colspan="${headers.length}" class="text-center">... and ${lines.length - 6} more rows</td></tr>`;
+        }
+        
+        html += '</tbody></table>';
+        previewContent.innerHTML = html;
+        preview.style.display = 'block';
+    };
+    
+    reader.readAsText(file);
+}
+
+async function importDevices() {
+    const fileInput = document.getElementById('importFile');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+        alert('Please select a file to import');
+        return;
+    }
+    
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch('/api/devices/import', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('importModal'));
+            modal.hide();
+            
+            // Show results
+            showImportResults(result);
+            
+            // Reload device list
+            loadDevices();
+        } else {
+            alert('Import failed: ' + result.error);
+        }
+    } catch (err) {
+        alert('Import error: ' + err.message);
+    }
+}
+
+function showImportResults(result) {
+    const { added, failed, total } = result;
+    
+    let message = `Import Complete:\n\n`;
+    message += `Total: ${total}\n`;
+    message += `Added: ${added}\n`;
+    message += `Failed: ${failed}\n`;
+    
+    if (result.errors && result.errors.length > 0) {
+        message += `\nErrors:\n`;
+        result.errors.forEach(err => {
+            message += `- ${err}\n`;
+        });
+    }
+    
+    if (added > 0) {
+        showSuccess(`Successfully imported ${added} device(s)`);
+    }
+    
+    if (failed > 0) {
+        alert(message);
+    }
+}
+
+  </script>
+  <!-- Import Template Modal -->
+<div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Import Devices Template</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle me-2"></i>
+                    <strong>Template Format:</strong> Upload CSV or Excel file with device details
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">Select File (CSV or Excel)</label>
+                    <input type="file" class="form-control" id="importFile" accept=".csv,.xlsx,.xls">
+                    <small class="text-muted">Supported formats: CSV, XLSX, XLS</small>
+                </div>
+                
+                <div class="mb-3">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="downloadSampleTemplate()">
+                        <i class="fas fa-download me-2"></i>Download Sample Template
+                    </button>
+                </div>
+                
+                <div id="importPreview" style="display: none;">
+                    <h6>Preview:</h6>
+                    <div id="previewContent" class="border p-2" style="max-height: 200px; overflow-y: auto;"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="importDevices()">
+                    <i class="fas fa-upload me-2"></i>Import Devices
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

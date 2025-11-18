@@ -1,0 +1,2047 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Network Configuration Manager</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <style>
+    :root {
+      --accent: #4a90e2;
+      --bg-from: #667eea;
+      --bg-to: #764ba2;
+      --golden: #f39c12;
+    }
+    body {
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, var(--bg-from) 0%, var(--bg-to) 100%);
+      margin: 12px;
+      position: relative;
+    }
+    .app-frame { 
+      background: #f6f8fb; 
+      border-radius: 8px; 
+      box-shadow: 0 8px 26px rgba(0,0,0,0.18); 
+      overflow: visible;  /* CHANGED from hidden */
+      position: relative;
+    }
+    .app-header { 
+      background: linear-gradient(90deg,var(--accent),#357abd); 
+      color: #fff; 
+      padding: 10px 16px; 
+      display:flex; 
+      align-items:center; 
+      justify-content:space-between; 
+      position: relative; 
+      z-index: 1000; 
+    }
+    .app-header .logo { background:#fff; color:var(--accent); padding:6px 10px; border-radius:6px; font-weight:700; margin-right:10px; }
+    .content { padding: 14px; background: #fff; }
+    .sidebar { padding: 12px; background: #fafbfd; border-right: 1px solid #e9eef6; min-height: 640px; }
+    .sidebar .list-group-item { border-radius: 6px; margin-bottom:6px; cursor:pointer; }
+    .sidebar .list-group-item.active { background: var(--accent); color: #fff; }
+    .device-list { max-height: 330px; overflow:auto; border-radius:6px; border:1px solid #eef2f6; background:#fff; }
+    .file-list { max-height: 240px; overflow:auto; border-radius:6px; border:1px solid #eef2f6; background:#fff; padding:8px; }
+    .panel { display:none; }
+    .panel.active { display:block; }
+    .results-area { max-height: 420px; overflow:auto; margin-top:12px; }
+    .device-card { margin-bottom: 10px; }
+    .status-success { background:#e6ffed; border-left:5px solid #28a745; padding:8px; border-radius:4px; }
+    .status-fail { background:#fff0f0; border-left:5px solid #dc3545; padding:8px; border-radius:4px; }
+    .small-muted { font-size:12px; color:#6c757d; }
+    .action-btn { min-width:140px; }
+    .golden-badge { background: var(--golden); color: white; font-size: 10px; padding: 2px 6px; border-radius: 10px; margin-left: 8px; }
+    .golden-star { color: var(--golden); font-size: 14px; margin-right: 4px; }
+    .mark-golden-btn { background: var(--golden); border-color: var(--golden); color: white; font-size: 11px; padding: 2px 8px; }
+    .file-item { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #f0f0f0; }
+    .spinner { display: none; border: 2px solid rgba(0, 0, 0, 0.1); border-left-color: #3498db; border-radius: 50%; width: 16px; height: 16px; animation: spin 1s linear infinite; margin-left: 8px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .small-spinner {
+      border: 2px solid rgba(0, 0, 0, 0.1);
+      border-left-color: #3498db;
+      border-radius: 50%;
+      display: inline-block;
+      vertical-align: middle;
+      width: 16px;
+      height: 16px;
+      animation: spin 1s linear infinite;
+      margin-left: 8px;
+    }
+    .files-section {
+      display: none;
+    }
+    
+    /* Refresh button styles */
+    .refresh-btn {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border: none;
+      color: white;
+      font-weight: 600;
+      transition: all 0.3s ease;
+    }
+    
+    .refresh-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+    
+    .restart-modal {
+      background: rgba(0, 0, 0, 0.85);
+    }
+    
+    .restart-spinner {
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #667eea;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+    }  /* FIXED: Added missing closing brace */
+
+    /* Hamburger Menu Styles */
+    .hamburger-menu {
+      position: relative;
+      z-index: 10000; 
+    }
+
+    .hamburger-btn {
+      background: transparent;
+      border: none;
+      color: white;
+      font-size: 24px;
+      cursor: pointer;
+      padding: 5px 10px;
+      transition: all 0.3s ease;
+    }
+
+    .hamburger-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+    }
+
+    .menu-dropdown {
+      display: none;
+      position: fixed;
+      right: 20px;
+      top: 60px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 8px 26px rgba(0,0,0,0.3);
+      min-width: 200px;
+      z-index: 99999;
+      overflow: hidden;
+    }
+
+    .menu-dropdown.show {
+      display: block;
+      animation: slideDown 0.3s ease;
+    }
+
+    @keyframes slideDown {
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .menu-item {
+      padding: 12px 20px;
+      color: #333;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transition: background 0.2s ease;
+      border-bottom: 1px solid #f0f0f0;
+      cursor: pointer;
+    }
+
+    .menu-item:last-child {
+      border-bottom: none;
+    }
+
+    .menu-item:hover {
+      background: #f8f9fa;
+      color: var(--accent);
+    }
+
+    .menu-item i {
+      width: 20px;
+      text-align: center;
+    }
+
+    .user-info {
+      padding: 15px 20px;
+      background: linear-gradient(135deg, var(--bg-from) 0%, var(--bg-to) 100%);
+      color: white;
+      font-weight: 600;
+      border-bottom: 2px solid rgba(255,255,255,0.2);
+    }
+</style>
+</head>
+<body>
+  <div class="app-header">
+    <div style="display:flex; align-items:center;">
+      <div class="logo">NCM</div>
+      <div><strong>Network Configuration Manager</strong></div>
+    </div>
+    
+    <!-- Hamburger Menu -->
+    <div class="hamburger-menu">
+      <button class="hamburger-btn" id="hamburgerBtn" title="Menu">
+        <i class="fas fa-bars"></i>
+      </button>
+      
+      <div class="menu-dropdown" id="menuDropdown">
+        <div class="user-info">
+          <i class="fas fa-user-circle me-2"></i>{{ user }}
+        </div>
+        
+        <button id="refreshAppBtn" class="menu-item" style="width: 100%; border: none; background: none; text-align: left;" title="Refresh Application">
+          <i class="fas fa-sync-alt"></i>
+          <span>Refresh Application</span>
+        </button>
+        
+        {% if current_user.is_authenticated and current_user.roles %}
+          {% for role in current_user.roles %}
+            {% if role.value == 'admin' %}
+              <a href="{{ url_for('manage_rbac') }}" class="menu-item">
+                <i class="fas fa-users-cog"></i>
+                <span>Manage Users</span>
+              </a>
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+        
+        <a href="{{ url_for('logout') }}" class="menu-item">
+          <i class="fas fa-sign-out-alt"></i>
+          <span>Logout</span>
+
+        <!-- Inside the menu-dropdown div, after the Refresh button -->
+        <a href="{{ url_for('device_management') }}" class="menu-item">
+          <i class="fas fa-network-wired"></i>
+          <span>Manage Devices</span>
+        </a>
+        </a>
+      </div>
+    </div>
+  </div>
+
+    <div class="content container-fluid">
+
+      <div class="row gx-3">
+        <!-- Sidebar -->
+        <div class="col-lg-2 sidebar">
+          <h6 class="mb-2">Features</h6>
+          <div class="list-group">
+            <button class="list-group-item list-group-item-action active" data-target="executePanel">
+              <i class="fas fa-play me-2"></i> Execute Command
+            </button>
+            <button class="list-group-item list-group-item-action" data-target="verifyPanel">
+              <i class="fas fa-check-circle me-2"></i> Verify Command
+            </button>
+            <button class="list-group-item list-group-item-action" data-target="backupPanel">
+              <i class="fas fa-download me-2"></i> Backup Config
+            </button>
+            <button class="list-group-item list-group-item-action" data-target="restorePanel">
+              <i class="fas fa-upload me-2"></i> Restore Config
+            </button>
+            <button class="list-group-item list-group-item-action" data-target="schedulePanel">
+              <i class="fas fa-clock me-2"></i> Schedule Config
+            </button>
+            <!-- In the sidebar, after the Schedule Config button -->
+            <button class="list-group-item list-group-item-action" data-target="auditPanel">
+ <i class="fas fa-network-wired me-2"></i> Device Audit
+</button>            <button class="list-group-item list-group-item-action" onclick="window.location.href='/monitoring'">
+              <i class="fas fa-chart-line me-2"></i> Monitoring Dashboard
+            </button>
+          </div>
+        </div>
+
+        <!-- Center Column - Devices & Files -->
+        <div class="col-lg-4 center-col">
+          <!-- Devices -->
+          <div class="card mb-3 devices-section">
+            <div class="card-header">Devices</div>
+            <div class="card-body">
+              <div class="form-check mb-1" id="selectAllContainer">
+                <input class="form-check-input" type="checkbox" id="selectAll">
+                <label class="form-check-label small-muted" for="selectAll">Select All</label>
+              </div>
+              <div class="small-muted mb-2" id="radioModeNote" style="display:none;">
+                <i class="fas fa-info-circle"></i> Select one device for this operation
+              </div>
+              <input id="deviceSearch" class="form-control form-control-sm mb-2" placeholder="Search devices..." />
+              <div id="deviceList" class="device-list list-group mb-2">
+                {% for device in devices %}
+                <label class="list-group-item" data-device-item>
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <input class="form-check-input device-input" type="checkbox" name="devices" value="{{ device }}" id="dev-{{ loop.index }}">
+                    <div style="flex:1; margin-left:8px;">
+                      <div style="font-weight:600;">{{ device }}</div>
+                      <div class="small-muted">{{ device.split('(')[0] | trim }}</div>
+                    </div>
+                  </div>
+                </label>
+                {% endfor %}
+              </div>
+              <div id="deviceCount" class="small-muted">Showing {{ devices | length }} devices</div>
+            </div>
+          </div>
+
+          <!-- Files -->
+          <div class="card files-section">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <span>Files (Backup / Golden)</span>
+              <div class="btn-group btn-group-sm">
+                <input type="radio" class="btn-check" name="fileMode" id="modeAll" value="all" checked>
+                <label class="btn btn-outline-primary btn-sm" for="modeAll">All</label>
+                <input type="radio" class="btn-check" name="fileMode" id="modeBackup" value="backup">
+                <label class="btn btn-outline-primary btn-sm" for="modeBackup">Backup</label>
+                <input type="radio" class="btn-check" name="fileMode" id="modeGolden" value="golden">
+                <label class="btn btn-outline-warning btn-sm" for="modeGolden"><i class="fas fa-star"></i> Golden</label>
+              </div>
+            </div>
+            <div class="card-body">
+              <div id="fileList" class="file-list small-muted">Select a device to load files</div>
+              <button id="downloadAllBtn" class="btn btn-success btn-sm w-100 mt-2" style="display: none;">
+                <i class="fas fa-download"></i> Download All Files
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Column - Action Panels -->
+        <div class="col-lg-6 right-col">
+          <!-- Execute Panel -->
+          <!-- Execute Panel -->
+          <!-- Execute Panel -->
+<div id="executePanel" class="panel active">
+  <div class="card mb-3">
+    <div class="card-header">Execute Command - Generate & Apply</div>
+    <div class="card-body">
+      <div class="mb-2">
+        <textarea id="promptText" class="form-control" rows="4" placeholder="Describe config or paste commands"></textarea>
+      </div>
+      <div class="d-flex flex-wrap gap-2">
+        <button id="generateBtn" class="btn btn-outline-primary action-btn">
+            <i class="fas fa-eye"></i> Preview <span id="generateSpinner" class="small-spinner" style="display: none;"></span>
+          </button>
+        <button id="executeBtn" class="btn btn-primary action-btn">
+          <i class="fas fa-play"></i> Apply <span id="executeSpinner" class="small-spinner" style="display: none;"></span>
+        </button>
+        <button id="execDownloadPdfBtn" class="btn btn-success action-btn" style="display:none;">
+          <i class="fas fa-file-pdf"></i> Download PDF
+        </button>
+      </div>
+      <div class="results-area mt-3" id="execResults"></div>
+    </div>
+  </div>
+</div>
+
+          <!-- Verify Panel -->
+          <!-- Verify Panel -->
+<div id="verifyPanel" class="panel">
+  <div class="card mb-3">
+    <div class="card-header">Verify / Run As-Is</div>
+    <div class="card-body">
+      <div class="mb-2 small-muted">Enter verify prompt or raw commands.</div>
+      <textarea id="verifyPrompt" class="form-control mb-2" rows="3" placeholder="Enter verification or raw command(s)"></textarea>
+      
+      <div class="d-flex gap-2 flex-wrap">
+        <button id="verifyBtn" class="btn btn-success action-btn">
+          <i class=""></i> Run verification through AI
+          <span id="verifySpinner" class="small-spinner" style="display: none;"></span>
+        </button>
+      
+        <button id="runAsisBtn" class="btn btn-primary action-btn">
+          <i class=""></i> Run command As-Is
+          <span id="asisSpinner" class="small-spinner" style="display: none;"></span>
+        </button>
+        
+        <button id="verifyDownloadPdfBtn" class="btn btn-success action-btn" style="display:none;">
+          <i class="fas fa-file-pdf"></i> Download PDF
+        </button>
+      </div>
+      <div class="results-area mt-3" id="verifyResults"></div>
+    </div>
+  </div>
+</div>
+
+        <!-- Backup Panel -->
+<div id="backupPanel" class="panel">
+  <div class="card mb-3">
+    <div class="card-header">Backup - Take Running Config</div>
+    <div class="card-body">
+      <div class="small-muted mb-2">Select devices on the left. Files panel is hidden for Backup.</div>
+      <div class="d-flex gap-2">
+        <button id="backupBtn" class="btn btn-warning action-btn">
+          <i class="fas fa-download"></i> Backup <span id="backupSpinner" class="small-spinner" style="display: none;"></span>
+        </button>
+      </div>
+      <div class="results-area mt-3" id="backupResults"></div>
+    </div>
+  </div>
+</div>
+
+          <!-- Restore Panel -->
+         <!-- Restore Panel -->
+<div id="restorePanel" class="panel">
+  <div class="card mb-3">
+    <div class="card-header">Restore</div>
+    <div class="card-body">
+      <div class="small-muted mb-2">Select a device to load its files, tick files in the Files panel, then click Restore.</div>
+      <div class="d-flex gap-2">
+        <button id="restoreBtn" class="btn btn-primary action-btn">
+          <i class="fas fa-upload"></i> Restore
+          <span id="restoreSpinner" class="small-spinner" style="display: none;"></span>
+        </button>
+      </div>
+      <div class="results-area mt-3" id="restoreResults"></div>
+    </div>
+  </div>
+</div>
+
+          <!-- Schedule Panel -->
+          <!-- Schedule Panel -->
+<div id="schedulePanel" class="panel">
+  <div class="card mb-3">
+    <div class="card-header">Schedule Backup</div>
+    <div class="card-body">
+      <div class="row g-2 align-items-center">
+        <div class="col-auto"><input type="date" id="scheduleDate" class="form-control"></div>
+        <div class="col-auto"><input type="time" id="scheduleTime" class="form-control"></div>
+        <div class="col-auto">
+          <button id="scheduleBtn" class="btn btn-secondary action-btn">
+            <i class="fas fa-calendar-plus"></i> Schedule <span id="scheduleSpinner" class="small-spinner" style="display: none;"></span>
+          </button>
+        </div>
+      </div>
+      <div class="small-muted mt-2">Scheduler runs in Flask background thread - ensure server is running.</div>
+      <div class="results-area mt-3" id="schedResults"></div>
+    </div>
+  </div>
+</div>
+<!-- NETCONF Panel -->
+<!-- Add this after the Schedule Panel -->
+<!-- Add this after the Schedule Panel -->
+<div id="auditPanel" class="panel">
+  <div class="card mb-3">
+    <div class="card-header">Device Audit - Comprehensive Configuration Analysis</div>
+    <div class="card-body">
+      <div class="small-muted mb-3">Select devices to generate a comprehensive audit report.</div>
+
+      <div class="d-flex gap-2 flex-wrap mb-3">
+        <!-- Single Download Audit Report Button -->
+        <button id="downloadAuditBtn" class="btn btn-success action-btn">
+          <i class="fas fa-download"></i> Get Comprehensive Audit Report
+          <span id="downloadAuditSpinner" class="small-spinner" style="display: none;"></span>
+        </button>
+      </div>
+
+      <!-- Results area - only shows success/error messages -->
+      <div id="auditResults"></div>
+    </div>
+  </div>
+</div>
+
+
+          <!-- Monitoring Panel -->
+          <div id="monitorPanel" class="panel">
+            <div class="card mb-3">
+              <div class="card-header">Monitoring</div>
+              <div class="card-body">
+                <div class="d-flex gap-2 mb-3">
+                  <button id="healthBtn" class="btn btn-success action-btn">
+                    <i class="fas fa-heartbeat"></i> Check Health <span id="healthSpinner" class="spinner"></span>
+                  </button>
+                  <button id="connectivityBtn" class="btn btn-info action-btn">
+                    <i class="fas fa-wifi"></i> Quick Ping <span id="connectivitySpinner" class="spinner"></span>
+                  </button>
+                </div>
+                <div id="monitorResults" class="results-area"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Preview Modal -->
+  <div class="modal fade" id="previewModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Preview Commands</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <textarea id="previewEditable" class="form-control" rows="12" style="font-family:monospace;"></textarea>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          <button id="applyFromPreviewBtn" class="btn btn-primary">
+            Apply <span id="applyPreviewSpinner" class="small-spinner" style="display: none;"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    
+    // Core utilities
+    const qs = (sel) => document.querySelector(sel);
+    const qsa = (sel) => Array.from(document.querySelectorAll(sel));
+    const escapeHtml = (str) => String(str || '').replace(/[&<>"']/g, m => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[m]);
+    function formatDiffWithColors(diffText) {
+      return escapeHtml(diffText).split('\n').map(line => {
+        if (line.startsWith('+++') || line.startsWith('---')) {
+          return `<span style="color:#75715e;">${line}</span>`;  // Gray for file headers
+        } else if (line.startsWith('@@')) {
+          return `<span style="color:#66d9ef; font-weight:bold;">${line}</span>`;  // Cyan for hunk headers
+        } else if (line.startsWith('+')) {
+          return `<span style="color:#a6e22e; background:rgba(166,226,46,0.1);">${line}</span>`;  // Green for additions
+        } else if (line.startsWith('-')) {
+          return `<span style="color:#f92672; background:rgba(249,38,114,0.1);">${line}</span>`;  // Red for deletions
+        } else {
+          return `<span style="color:#f8f8f2;">${line}</span>`;  // White for context
+        }
+      }).join('\n');
+    }
+
+    let selectedDeviceForFiles = '';
+let deviceSelections = {}; // Store selections per panel
+let currentPanel = 'executePanel';
+
+// Panels that use radio buttons (single selection)
+const radioModePanels = ['restorePanel', 'auditPanel'];
+
+// Spinner helpers
+function showSpinner(id) { const el = qs(`#${id}`); if (el) el.style.display = 'inline-block'; }
+function hideSpinner(id) { const el = qs(`#${id}`); if (el) el.style.display = 'none'; }
+
+// Switch device input type based on panel
+function updateDeviceInputType(panelId) {
+  const isRadioMode = radioModePanels.includes(panelId);
+  const selectAllContainer = qs('#selectAllContainer');
+  const radioModeNote = qs('#radioModeNote');
+  
+  // Show/hide UI elements
+  if (selectAllContainer) {
+    selectAllContainer.style.display = isRadioMode ? 'none' : 'block';
+  }
+  if (radioModeNote) {
+    radioModeNote.style.display = isRadioMode ? 'block' : 'none';
+  }
+  
+  // Change input types
+  qsa('.device-input').forEach(input => {
+    input.type = isRadioMode ? 'radio' : 'checkbox';
+    if (isRadioMode) {
+      input.name = 'single-device';
+    } else {
+      input.name = 'devices';
+    }
+  });
+}
+
+    // Device selection management
+    function saveCurrentSelections() {
+      const isRadioMode = radioModePanels.includes(currentPanel);
+      if (isRadioMode) {
+        const selected = qs('.device-input:checked')?.value;
+        deviceSelections[currentPanel] = selected ? [selected] : [];
+      } else {
+        const selected = qsa('.device-input:checked').map(cb => cb.value);
+        deviceSelections[currentPanel] = selected;
+      }
+    }
+    function loadPanelSelections(panelId) {
+      // First update input types for the panel
+      updateDeviceInputType(panelId);
+      
+      // Always clear all selections when switching panels
+      qsa('.device-input').forEach(cb => cb.checked = false);
+      
+      // Clear the select all checkbox
+      const selectAllCheckbox = qs('#selectAll');
+      if (selectAllCheckbox) {
+        selectAllCheckbox.checked = false;
+      }
+      
+      // Clear saved selections for this panel (fresh start)
+      deviceSelections[panelId] = [];
+      
+      // Clear selected device for files
+      selectedDeviceForFiles = '';
+      
+      // Clear file list and hide download button
+      const fileList = qs('#fileList');
+      const downloadAllBtn = qs('#downloadAllBtn');
+      if (fileList) {
+        fileList.innerHTML = '<div class="small-muted">Select a device to load files</div>';
+      }
+      if (downloadAllBtn) {
+        downloadAllBtn.style.display = 'none';
+      }
+      
+      updateDeviceCount();
+    }
+    function updateDeviceCount() {
+      const isRadioMode = radioModePanels.includes(currentPanel);
+      const total = qsa('.device-input').length;
+      const checked = qsa('.device-input:checked').length;
+      
+      if (isRadioMode) {
+        qs('#deviceCount').innerText = `Showing ${total} devices • ${checked} selected`;
+      } else {
+        qs('#deviceCount').innerText = `Showing ${total} devices • ${checked} selected`;
+      }
+    }
+    function getSelectedDevices() { 
+      return qsa('.device-input:checked').map(cb => cb.value); 
+    }
+
+    // Load backup files
+    async function loadBackupFiles(deviceLabel) {
+      const el = qs('#fileList');
+      const downloadAllBtn = qs('#downloadAllBtn');
+      if (!deviceLabel) {
+        el.innerHTML = '<div class="small-muted">Select a device to load files</div>';
+        if (downloadAllBtn) downloadAllBtn.style.display = 'none';
+        return;
+      }
+
+      el.innerHTML = 'Loading...';
+      const mode = qs('input[name="fileMode"]:checked')?.value || 'all';
+      
+      try {
+        const res = await fetch(`/get_backup_files?device=${encodeURIComponent(deviceLabel)}&mode=${mode}`);
+        const files = await res.json();
+        
+        if (!files || files.length === 0) {
+          el.innerHTML = `<div class="small-muted">No ${mode} files found</div>`;
+          return;
+        }
+
+        el.innerHTML = '';
+        files.forEach((f, idx) => {
+          const fileObj = typeof f === 'string' ? { name: f, path: f, type: 'backup' } : f;
+          const id = `file-${idx}`;
+          
+          const fileItem = document.createElement('div');
+          fileItem.className = 'file-item';
+          fileItem.innerHTML = `
+            <div style="display:flex; align-items:center; flex:1;">
+              <input class="form-check-input" type="checkbox" id="${id}" name="files" value='${JSON.stringify(fileObj)}'>
+              <label class="form-check-label ms-2" for="${id}" style="flex:1;">
+                <div style="font-weight:600;">
+                  ${escapeHtml(fileObj.name)}
+                  ${fileObj.type === 'golden_config' ? '<span class="golden-badge"><i class="fas fa-star"></i> Golden</span>' : ''}
+                </div>
+                <div class="small-muted">${fileObj.type || 'backup'}</div>
+              </label>
+            </div>
+            <div>
+              <a href="/download_backup/${encodeURIComponent(deviceLabel)}/${encodeURIComponent(fileObj.path)}" 
+                 class="btn btn-sm btn-outline-primary" target="_blank" title="Download">
+                <i class="fas fa-download"></i>
+              </a>
+              ${fileObj.can_mark_golden && fileObj.type !== 'golden_config' ? 
+                `<button class="btn btn-sm mark-golden-btn" onclick="markAsGolden('${escapeHtml(JSON.stringify(fileObj))}', '${escapeHtml(deviceLabel)}')" title="Mark as Golden">
+                  <i class="fas fa-star"></i>
+                </button>` : ''}
+            </div>
+          `;
+          el.appendChild(fileItem);
+        });
+
+        if (files.length > 0 && downloadAllBtn) {
+          downloadAllBtn.style.display = 'block';
+          downloadAllBtn.onclick = () => window.open(`/download_device_all/${encodeURIComponent(deviceLabel)}`, '_blank');
+        }
+      } catch (err) {
+        el.innerHTML = `<div class="text-danger">Failed to load files: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    // Mark file as golden
+    async function markAsGolden(fileObjStr, deviceLabel) {
+      try {
+        const fileObj = JSON.parse(fileObjStr);
+        const res = await fetch('/mark_as_golden', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            device_name: fileObj.device_name || deviceLabel.split(' ')[0],
+            backup_filename: fileObj.name,
+            file_type: fileObj.type
+          })
+        });
+        const result = await res.json();
+        if (result.success) {
+          alert('Marked as golden config successfully!');
+          loadBackupFiles(selectedDeviceForFiles);
+        } else {
+          alert('Failed: ' + result.error);
+        }
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    }
+
+    // Execute command
+    async function executeFromPrompt() {
+      const devices = getSelectedDevices();
+      const prompt = qs('#promptText').value.trim();
+      if (!devices.length || !prompt) {
+        alert('Select devices and enter prompt');
+        return;
+      }
+    
+      showSpinner('executeSpinner');
+      qs('#execResults').innerHTML = '';
+    
+      try {
+        const res = await fetch('/generate_config_only', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ devices, prompt })
+        });
+        const data = await res.json();
+        
+        if (data.error) {
+          qs('#execResults').innerHTML = `<div class="alert alert-danger">${escapeHtml(data.error)}</div>`;
+          return;
+        }
+    
+        (data.device_results || []).forEach(r => {
+          const card = document.createElement('div');
+          card.className = 'card device-card';
+          
+          // ===== REPLACE THIS ENTIRE card.innerHTML BLOCK =====
+          card.innerHTML = `
+            <div class="card-header"><strong>${escapeHtml(r.device)}</strong></div>
+            <div class="${r.success ? 'status-success' : 'status-fail'}">
+              ${r.success ? 'Success' : 'Failed'}: ${escapeHtml(r.message || '')}
+            </div>
+            
+            ${r.command_outputs && r.command_outputs.length ? `
+              <div class="card-body">
+                <h6 class="mb-2">Command Outputs:</h6>
+                ${r.command_outputs.map(co => `
+                  <div class="mb-3">
+                    <strong>Command:</strong> <code>${escapeHtml(co.command)}</code><br>
+                    <pre class="mt-1 mb-0" style="font-size:12px; background:#f8f9fa; padding:8px; border-radius:4px; max-height:200px; overflow:auto;">${escapeHtml(co.output || '')}</pre>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+            
+            ${r.config_diff ? `
+              <div class="card-body border-top">
+                <h6 class="mb-2">
+                  <i class="fas fa-code-branch me-2"></i>Configuration Diff
+                  ${r.change_summary ? `<span class="badge bg-info ms-2">${escapeHtml(r.change_summary)}</span>` : ''}
+                </h6>
+                ${r.config_diff.includes('No configuration changes detected') || r.config_diff.includes('Could not generate diff') 
+                  ? `<div class="alert alert-info mb-0">${escapeHtml(r.config_diff)}</div>`
+                  : `<pre style="font-size:11px; background:#2b2b2b; color:#f8f8f2; padding:12px; border-radius:4px; max-height:400px; overflow:auto; font-family:'Courier New',monospace;">${formatDiffWithColors(r.config_diff)}</pre>`
+                }
+              </div>
+            ` : ''}
+          `;
+          // ===== END OF REPLACEMENT =====
+          
+          qs('#execResults').prepend(card);
+        });
+      } catch (err) {
+        qs('#execResults').innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(err.message)}</div>`;
+      } finally {
+        hideSpinner('executeSpinner');
+      }
+    }
+
+    // Health check with Chart.js
+    async function healthCheck() {
+      const devices = getSelectedDevices();
+      if (!devices.length) { alert('Select devices'); return; }
+      
+      showSpinner('healthSpinner');
+      qs('#monitorResults').innerHTML = '';
+      
+      try {
+        const res = await fetch('/health_check', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({devices})
+        });
+        const data = await res.json();
+        
+        const container = qs('#monitorResults');
+        const chartDiv = document.createElement('div');
+        chartDiv.style.cssText = 'background:white; border-radius:8px; padding:20px; height:350px; margin-bottom:20px;';
+        chartDiv.innerHTML = '<canvas id="healthChart"></canvas>';
+        container.appendChild(chartDiv);
+        
+        const ctx = qs('#healthChart').getContext('2d');
+        new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: data.results.map(r => r.device.split(' ')[0]),
+            datasets: [
+              { label: 'CPU %', data: data.results.map(r => r.cpu || 0), backgroundColor: '#4a90e2' },
+              { label: 'Memory %', data: data.results.map(r => r.memory || 0), backgroundColor: '#e74c3c' }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: { y: { beginAtZero: true, max: 100 } }
+          }
+        });
+      } catch (err) {
+        qs('#monitorResults').innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(err.message)}</div>`;
+      } finally {
+        hideSpinner('healthSpinner');
+      }
+    }
+
+    // Event listeners
+      // Event listeners
+      document.addEventListener('DOMContentLoaded', () => {
+        qs('#selectAll')?.addEventListener('change', (e) => {
+          // Only work if not in radio mode
+          if (!radioModePanels.includes(currentPanel)) {
+            qsa('.device-input').forEach(cb => cb.checked = e.target.checked);
+            updateDeviceCount();
+            saveCurrentSelections();
+          }
+        });
+      
+        qsa('.device-input').forEach(cb => cb.addEventListener('change', function() {
+          const isRadioMode = radioModePanels.includes(currentPanel);
+          
+          if (isRadioMode) {
+            // For radio mode (restore/audit), handle single selection
+            updateDeviceCount();
+            
+            // For restore panel, load files when device is selected
+            if (currentPanel === 'restorePanel') {
+              if (this.checked) {
+                selectedDeviceForFiles = this.value;
+                loadBackupFiles(selectedDeviceForFiles);
+              } else {
+                // Clear files if device is unchecked
+                selectedDeviceForFiles = '';
+                const fileList = qs('#fileList');
+                const downloadAllBtn = qs('#downloadAllBtn');
+                if (fileList) {
+                  fileList.innerHTML = '<div class="small-muted">Select a device to load files</div>';
+                }
+                if (downloadAllBtn) {
+                  downloadAllBtn.style.display = 'none';
+                }
+              }
+            }
+          } else {
+            // For checkbox mode (other panels), handle multiple selections
+            updateDeviceCount();
+            
+            // Update select all checkbox state
+            const allCheckboxes = qsa('.device-input');
+            const checkedCheckboxes = qsa('.device-input:checked');
+            const selectAllCheckbox = qs('#selectAll');
+            if (selectAllCheckbox) {
+              selectAllCheckbox.checked = allCheckboxes.length > 0 && allCheckboxes.length === checkedCheckboxes.length;
+            }
+          }
+        }));
+      qsa('input[name="fileMode"]').forEach(r => r.addEventListener('change', () => {
+        if (selectedDeviceForFiles) loadBackupFiles(selectedDeviceForFiles);
+      }));
+
+      qs('#executeBtn')?.addEventListener('click', executeFromPrompt);
+      qs('#generateBtn')?.addEventListener('click', generatePreview);
+      qs('#applyFromPreviewBtn')?.addEventListener('click', applyFromPreview);
+      qs('#healthBtn')?.addEventListener('click', healthCheck);
+
+      // Sidebar navigation
+      qsa('.sidebar .list-group-item').forEach(btn => btn.addEventListener('click', function() {
+        // Don't process if it's the monitoring dashboard link
+        if (this.hasAttribute('onclick')) return;
+        
+        // Save current panel selections before switching
+        saveCurrentSelections();
+        
+        qsa('.sidebar .list-group-item').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        qsa('.panel').forEach(p => p.classList.remove('active'));
+        qs(`#${this.dataset.target}`)?.classList.add('active');
+        
+        // Update current panel and load its selections
+        currentPanel = this.dataset.target;
+        loadPanelSelections(currentPanel);
+        
+        // Show/hide Files section based on active panel
+        const filesSection = qs('.files-section');
+        if (filesSection) {
+          filesSection.style.display = this.dataset.target === 'restorePanel' ? 'block' : 'none';
+        }
+      }));
+      updateDeviceInputType(currentPanel);
+      qs('#backupBtn')?.addEventListener('click', backupDevices);
+      qs('#restoreBtn')?.addEventListener('click', restoreDevices);
+      qs('#scheduleBtn')?.addEventListener('click', scheduleBackup);
+      qs('#verifyBtn')?.addEventListener('click', verifyFromPrompt);
+      qs('#runAsisBtn')?.addEventListener('click', runAsisFromPrompt);
+    });  // ← DOMContentLoaded ends here
+    
+    // ========================================
+    // Function definitions (MOVE INSIDE SCRIPT TAG)
+    // ========================================
+    
+    // Backup devices
+    // ========================================
+    // Function definitions (MOVE INSIDE SCRIPT TAG)
+    // ========================================
+    
+    // Preview/Generate command
+    // Preview/Generate command
+    async function generatePreview() {
+  const devices = getSelectedDevices();
+  const prompt = qs('#promptText').value.trim();
+  
+  if (!devices.length || !prompt) {
+    alert('Select devices and enter prompt');
+    return;
+  }
+  
+  showSpinner('generateSpinner');
+  
+  try {
+    // ✅ CORRECT - Call the fast preview endpoint
+    const res = await fetch('/generate_config_only', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ 
+        devices: devices,  // CRITICAL: Pass selected devices
+        prompt: prompt // or extract from first device
+      })
+    });
+    const data = await res.json();
+    
+    if (data.error) {
+      alert('Error: ' + data.error);
+      return;
+    }
+
+    // Extract commands from the response
+    let commands = '';
+    if (data.commands) {
+      commands = Array.isArray(data.commands) ? data.commands.join('\n') : data.commands;
+    } else {
+      commands = 'No commands generated';
+    }
+    
+    // Show commands in modal
+    qs('#previewEditable').value = commands;
+    
+    const modal = new bootstrap.Modal(qs('#previewModal'));
+    modal.show();
+  } catch (err) {
+    alert('Error generating preview: ' + err.message);
+  } finally {
+    hideSpinner('generateSpinner');
+  }
+}
+// Apply from preview modal
+async function applyFromPreview() {
+  const devices = getSelectedDevices();
+  const editedCommands = qs('#previewEditable').value.trim();
+  
+  if (!devices.length || !editedCommands) {
+    alert('No devices or commands to apply');
+    return;
+  }
+
+  showSpinner('applyPreviewSpinner');  // Show spinner
+
+  try {
+    // Send edited commands to server
+    const res = await fetch('/execute_command', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ 
+        devices, 
+        prompt: editedCommands,
+        skip_generation: true  // Use commands as-is, don't regenerate
+      })
+    });
+    const data = await res.json();
+    
+    // Store results for PDF download
+    lastExecuteResults = data;
+    lastExecutePrompt = editedCommands;
+    
+    // Close the preview modal
+    const modal = bootstrap.Modal.getInstance(qs('#previewModal'));
+    if (modal) modal.hide();
+    
+    // Display results in Execute panel (same as executeFromPrompt)
+    qs('#execResults').innerHTML = '';
+    
+    if (data.error) {
+      qs('#execResults').innerHTML = `<div class="alert alert-danger">${escapeHtml(data.error)}</div>`;
+      return;
+    }
+
+    // Show PDF download button
+    if (data.device_results && data.device_results.length > 0) {
+      qs('#execDownloadPdfBtn').style.display = 'inline-block';
+    }
+
+    // Create result cards for each device
+    (data.device_results || []).forEach(r => {
+      const card = document.createElement('div');
+      card.className = 'card device-card';
+      
+      card.innerHTML = `
+        <div class="card-header"><strong>${escapeHtml(r.device)}</strong></div>
+        <div class="${r.success ? 'status-success' : 'status-fail'}">
+          ${r.success ? 'Success' : ' Failed'}: ${escapeHtml(r.message || '')}
+        </div>
+        
+        ${r.command_outputs && r.command_outputs.length ? `
+          <div class="card-body">
+            <h6 class="mb-2">Command Outputs:</h6>
+            ${r.command_outputs.map(co => `
+              <div class="mb-3">
+                <strong>Command:</strong> <code>${escapeHtml(co.command)}</code><br>
+                <pre class="mt-1 mb-0" style="font-size:12px; background:#f8f9fa; padding:8px; border-radius:4px; max-height:200px; overflow:auto;">${escapeHtml(co.output || '')}</pre>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+        
+        ${r.config_diff ? `
+          <div class="card-body border-top">
+            <h6 class="mb-2">
+              <i class="fas fa-code-branch me-2"></i>Configuration Diff
+              ${r.change_summary ? `<span class="badge bg-info ms-2">${escapeHtml(r.change_summary)}</span>` : ''}
+            </h6>
+            ${r.config_diff.includes('No configuration changes detected') || r.config_diff.includes('Could not generate diff') 
+              ? `<div class="alert alert-info mb-0">${escapeHtml(r.config_diff)}</div>`
+              : `<pre style="font-size:11px; background:#2b2b2b; color:#f8f8f2; padding:12px; border-radius:4px; max-height:400px; overflow:auto; font-family:'Courier New',monospace;">${formatDiffWithColors(r.config_diff)}</pre>`
+            }
+          </div>
+        ` : ''}
+      `;
+      
+      qs('#execResults').prepend(card);
+    });
+  } catch (err) {
+    qs('#execResults').innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(err.message)}</div>`;
+  } finally {
+    hideSpinner('applyPreviewSpinner');  // Always hide spinner
+  }
+}
+    async function backupDevices() {
+      const devices = getSelectedDevices();
+      if (!devices.length) { alert('Select devices to backup'); return; }
+      
+      showSpinner('backupSpinner');
+      qs('#backupResults').innerHTML = '';
+      
+      try {
+        const res = await fetch('/backup_devices', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ devices })
+        });
+        const data = await res.json();
+        
+        if (data.error) {
+          qs('#backupResults').innerHTML = `<div class="alert alert-danger">${escapeHtml(data.error)}</div>`;
+          return;
+        }
+
+        (data.results || []).forEach(r => {
+          const card = document.createElement('div');
+          card.className = 'card device-card';
+          card.innerHTML = `
+            <div class="card-header"><strong>${escapeHtml(r.device)}</strong></div>
+            <div class="${r.success ? 'status-success' : 'status-fail'}">
+              ${r.success ? 'Success' : 'Failed'}: ${escapeHtml(r.message || '')}
+            </div>
+          `;
+          qs('#backupResults').prepend(card);
+        });
+      } catch (err) {
+        qs('#backupResults').innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(err.message)}</div>`;
+      } finally {
+        hideSpinner('backupSpinner');
+      }
+    }
+
+    // Restore devices
+    async function restoreDevices() {
+      const checkedFiles = qsa('#fileList input[name="files"]:checked');
+      if (!checkedFiles.length) {
+        alert('Please select backup files to restore');
+        return;
+      }
+      
+      const selectedFiles = checkedFiles.map(cb => {
+        try { return JSON.parse(cb.value); }
+        catch (e) { return null; }
+      }).filter(f => f !== null);
+
+      if (!selectedFiles.length) { alert('No valid files selected'); return; }
+
+      showSpinner('restoreSpinner');
+      qs('#restoreResults').innerHTML = '';
+
+      try {
+        const res = await fetch('/restore_devices', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ device: selectedDeviceForFiles, files: selectedFiles })
+        });
+        const data = await res.json();
+        
+        if (data.error) {
+          qs('#restoreResults').innerHTML = `<div class="alert alert-danger">${escapeHtml(data.error)}</div>`;
+          return;
+        }
+
+        (data.results || []).forEach(r => {
+          const card = document.createElement('div');
+          card.className = 'card device-card';
+          card.innerHTML = `
+            <div class="card-header"><strong>${escapeHtml(r.device)}</strong></div>
+            <div class="${r.success ? 'status-success' : 'status-fail'}">
+              ${r.success ? 'Success' : 'Failed'}: ${escapeHtml(r.message || '')}
+            </div>
+          `;
+          qs('#restoreResults').prepend(card);
+        });
+      } catch (err) {
+        qs('#restoreResults').innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(err.message)}</div>`;
+      } finally {
+        hideSpinner('restoreSpinner');
+      }
+    }
+
+    // Schedule backup
+    async function scheduleBackup() {
+      const devices = getSelectedDevices();
+      const date = qs('#scheduleDate').value;
+      const time = qs('#scheduleTime').value;
+      
+      if (!devices.length || !date || !time) {
+        alert('Select devices and set date/time');
+        return;
+      }
+
+      showSpinner('scheduleSpinner');
+      qs('#schedResults').innerHTML = '';
+
+      try {
+        const res = await fetch('/schedule_backup', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ devices, date, time })
+        });
+        const data = await res.json();
+        
+        if (data.error) {
+          qs('#schedResults').innerHTML = `<div class="alert alert-danger">${escapeHtml(data.error)}</div>`;
+        } else {
+          qs('#schedResults').innerHTML = `<div class="alert alert-success">${escapeHtml(data.message || 'Scheduled')}</div>`;
+        }
+      } catch (err) {
+        qs('#schedResults').innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(err.message)}</div>`;
+      } finally {
+        hideSpinner('scheduleSpinner');
+      }
+    }
+
+    // Verify command
+    async function verifyFromPrompt() {
+      const devices = getSelectedDevices();
+      const prompt = qs('#verifyPrompt').value.trim();
+      
+      if (!devices.length || !prompt) {
+        alert('Select devices and enter verify prompt');
+        return;
+      }
+
+      showSpinner('verifySpinner');
+      qs('#verifyResults').innerHTML = '';
+
+      try {
+        const res = await fetch('/verify_command', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ devices, prompt })
+        });
+        const data = await res.json();
+        
+        if (data.error) {
+          qs('#verifyResults').innerHTML = `<div class="alert alert-danger">${escapeHtml(data.error)}</div>`;
+          return;
+        }
+
+        (data.device_results || []).forEach(r => {
+          const card = document.createElement('div');
+          card.className = 'card device-card';
+          card.innerHTML = `
+            <div class="card-header"><strong>${escapeHtml(r.device)}</strong></div>
+            <div class="${r.success ? 'status-success' : 'status-fail'}">
+              ${r.success ? 'Success' : 'Failed'}: ${escapeHtml(r.message || '')}
+            </div>
+            ${r.command_outputs && r.command_outputs.length ? `
+              <div class="card-body">
+                ${r.command_outputs.map(co => `
+                  <div class="mb-2">
+                    <strong>Command:</strong> ${escapeHtml(co.command)}<br>
+                    <pre class="mt-1 mb-0" style="font-size:12px;">${escapeHtml(co.output || '')}</pre>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+          `;
+          qs('#verifyResults').prepend(card);
+        });
+      } catch (err) {
+        qs('#verifyResults').innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(err.message)}</div>`;
+      } finally {
+        hideSpinner('verifySpinner');
+      }
+    }
+
+    // Run as-is (no AI)
+    async function runAsisFromPrompt() {
+      const devices = getSelectedDevices();
+      const prompt = qs('#verifyPrompt').value.trim();
+      
+      if (!devices.length || !prompt) {
+        alert('Select devices and enter commands');
+        return;
+      }
+
+      showSpinner('asisSpinner');
+      qs('#verifyResults').innerHTML = '';
+
+      try {
+        const res = await fetch('/run_asis_command', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ devices, prompt })
+        });
+        const data = await res.json();
+        
+        if (data.error) {
+          qs('#verifyResults').innerHTML = `<div class="alert alert-danger">${escapeHtml(data.error)}</div>`;
+          return;
+        }
+
+        (data.device_results || []).forEach(r => {
+          const card = document.createElement('div');
+          card.className = 'card device-card';
+          card.innerHTML = `
+            <div class="card-header"><strong>${escapeHtml(r.device)}</strong></div>
+            <div class="${r.success ? 'status-success' : 'status-fail'}">
+              ${r.success ? 'Success' : 'Failed'}: ${escapeHtml(r.message || '')}
+            </div>
+            ${r.command_outputs && r.command_outputs.length ? `
+              <div class="card-body">
+                ${r.command_outputs.map(co => `
+                  <div class="mb-2">
+                    <strong>Command:</strong> ${escapeHtml(co.command)}<br>
+                    <pre class="mt-1 mb-0" style="font-size:12px;">${escapeHtml(co.output || '')}</pre>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+          `;
+          qs('#verifyResults').prepend(card);
+        });
+      } catch (err) {
+        qs('#verifyResults').innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(err.message)}</div>`;
+      } finally {
+        hideSpinner('asisSpinner');
+      }
+    }
+    // ========================================
+// PDF Download Functionality
+// ========================================
+
+// Store results for PDF generation
+let lastExecuteResults = null;
+let lastExecutePrompt = '';
+let lastVerifyResults = null;
+let lastVerifyPrompt = '';
+let lastIsAsis = false;
+
+// Update executeFromPrompt to store results
+const originalExecuteFromPrompt = executeFromPrompt;
+async function executeFromPrompt() {
+  const prompt = qs('#promptText').value.trim();
+  lastExecutePrompt = prompt;
+  
+  showSpinner('executeSpinner');
+  qs('#execResults').innerHTML = '';
+  qs('#execDownloadPdfBtn').style.display = 'none'; // Hide button initially
+
+  const devices = getSelectedDevices();
+  if (!devices.length || !prompt) {
+    alert('Select devices and enter prompt');
+    hideSpinner('executeSpinner');
+    return;
+  }
+
+  try {
+    const res = await fetch('/execute_command', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ devices, prompt })
+    });
+    const data = await res.json();
+    
+    // Store results for PDF
+    lastExecuteResults = data;
+    
+    if (data.error) {
+      qs('#execResults').innerHTML = `<div class="alert alert-danger">${escapeHtml(data.error)}</div>`;
+      return;
+    }
+
+    // Show download button if we have results
+    if (data.device_results && data.device_results.length > 0) {
+      qs('#execDownloadPdfBtn').style.display = 'inline-block';
+    }
+
+    (data.device_results || []).forEach(r => {
+      const card = document.createElement('div');
+      card.className = 'card device-card';
+      
+      card.innerHTML = `
+        <div class="card-header"><strong>${escapeHtml(r.device)}</strong></div>
+        <div class="${r.success ? 'status-success' : 'status-fail'}">
+          ${r.success ? 'Success' : ' Failed'}: ${escapeHtml(r.message || '')}
+        </div>
+        
+        ${r.command_outputs && r.command_outputs.length ? `
+          <div class="card-body">
+            <h6 class="mb-2">Command Outputs:</h6>
+            ${r.command_outputs.map(co => `
+              <div class="mb-3">
+                <strong>Command:</strong> <code>${escapeHtml(co.command)}</code><br>
+                <pre class="mt-1 mb-0" style="font-size:12px; background:#f8f9fa; padding:8px; border-radius:4px; max-height:200px; overflow:auto;">${escapeHtml(co.output || '')}</pre>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+        
+        ${r.config_diff ? `
+          <div class="card-body border-top">
+            <h6 class="mb-2">
+              <i class="fas fa-code-branch me-2"></i>Configuration Diff
+              ${r.change_summary ? `<span class="badge bg-info ms-2">${escapeHtml(r.change_summary)}</span>` : ''}
+            </h6>
+            ${r.config_diff.includes('No configuration changes detected') || r.config_diff.includes('Could not generate diff') 
+              ? `<div class="alert alert-info mb-0">${escapeHtml(r.config_diff)}</div>`
+              : `<pre style="font-size:11px; background:#2b2b2b; color:#f8f8f2; padding:12px; border-radius:4px; max-height:400px; overflow:auto; font-family:'Courier New',monospace;">${formatDiffWithColors(r.config_diff)}</pre>`
+            }
+          </div>
+        ` : ''}
+      `;
+      
+      qs('#execResults').prepend(card);
+    });
+  } catch (err) {
+    qs('#execResults').innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(err.message)}</div>`;
+  } finally {
+    hideSpinner('executeSpinner');
+  }
+}
+
+// Download Execute PDF handler
+qs('#execDownloadPdfBtn')?.addEventListener('click', async () => {
+  if (!lastExecuteResults) {
+    alert('No results to download');
+    return;
+  }
+  
+  try {
+    const res = await fetch('/download_execute_summary', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        results: lastExecuteResults,
+        prompt: lastExecutePrompt
+      })
+    });
+    
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(errorData.error || 'PDF generation failed');
+    }
+    
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `config_summary_${new Date().getTime()}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    
+    // Show success message
+    const successMsg = document.createElement('div');
+    successMsg.className = 'alert alert-success alert-dismissible fade show mt-2';
+    successMsg.innerHTML = `
+       PDF downloaded successfully!
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    qs('#execResults').prepend(successMsg);
+    setTimeout(() => successMsg.remove(), 3000);
+    
+  } catch (err) {
+    alert('Failed to download PDF: ' + err.message);
+  }
+});
+
+// Update verifyFromPrompt to store results
+async function verifyFromPrompt() {
+  const devices = getSelectedDevices();
+  const prompt = qs('#verifyPrompt').value.trim();
+  
+  if (!devices.length || !prompt) {
+    alert('Select devices and enter verify prompt');
+    return;
+  }
+
+  lastVerifyPrompt = prompt;
+  lastIsAsis = false;
+  
+  showSpinner('verifySpinner');
+  qs('#verifyResults').innerHTML = '';
+  qs('#verifyDownloadPdfBtn').style.display = 'none';
+
+  try {
+    const res = await fetch('/verify_command', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ devices, prompt })
+    });
+    const data = await res.json();
+    
+    // Store results for PDF
+    lastVerifyResults = data;
+    
+    if (data.error) {
+      qs('#verifyResults').innerHTML = `<div class="alert alert-danger">${escapeHtml(data.error)}</div>`;
+      return;
+    }
+
+    // Show download button
+    if (data.device_results && data.device_results.length > 0) {
+      qs('#verifyDownloadPdfBtn').style.display = 'inline-block';
+    }
+
+    (data.device_results || []).forEach(r => {
+      const card = document.createElement('div');
+      card.className = 'card device-card';
+      card.innerHTML = `
+        <div class="card-header"><strong>${escapeHtml(r.device)}</strong></div>
+        <div class="${r.success ? 'status-success' : 'status-fail'}">
+          ${r.success ? 'Success' : 'Failed'}: ${escapeHtml(r.message || '')}
+        </div>
+        ${r.command_outputs && r.command_outputs.length ? `
+          <div class="card-body">
+            ${r.command_outputs.map(co => `
+              <div class="mb-2">
+                <strong>Command:</strong> ${escapeHtml(co.command)}<br>
+                <pre class="mt-1 mb-0" style="font-size:12px;">${escapeHtml(co.output || '')}</pre>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+      `;
+      qs('#verifyResults').prepend(card);
+    });
+  } catch (err) {
+    qs('#verifyResults').innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(err.message)}</div>`;
+  } finally {
+    hideSpinner('verifySpinner');
+  }
+}
+
+// Update runAsisFromPrompt to store results
+async function runAsisFromPrompt() {
+  const devices = getSelectedDevices();
+  const prompt = qs('#verifyPrompt').value.trim();
+  
+  if (!devices.length || !prompt) {
+    alert('Select devices and enter commands');
+    return;
+  }
+
+  lastVerifyPrompt = prompt;
+  lastIsAsis = true;
+
+  showSpinner('asisSpinner');
+  qs('#verifyResults').innerHTML = '';
+  qs('#verifyDownloadPdfBtn').style.display = 'none';
+
+  try {
+    const res = await fetch('/run_asis_command', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ devices, prompt })
+    });
+    const data = await res.json();
+    
+    // Store results for PDF
+    lastVerifyResults = data;
+    
+    if (data.error) {
+      qs('#verifyResults').innerHTML = `<div class="alert alert-danger">${escapeHtml(data.error)}</div>`;
+      return;
+    }
+
+    // Show download button
+    if (data.device_results && data.device_results.length > 0) {
+      qs('#verifyDownloadPdfBtn').style.display = 'inline-block';
+    }
+
+    (data.device_results || []).forEach(r => {
+      const card = document.createElement('div');
+      card.className = 'card device-card';
+      card.innerHTML = `
+        <div class="card-header"><strong>${escapeHtml(r.device)}</strong></div>
+        <div class="${r.success ? 'status-success' : 'status-fail'}">
+          ${r.success ? 'Success' : 'Failed'}: ${escapeHtml(r.message || '')}
+        </div>
+        ${r.command_outputs && r.command_outputs.length ? `
+          <div class="card-body">
+            ${r.command_outputs.map(co => `
+              <div class="mb-2">
+                <strong>Command:</strong> ${escapeHtml(co.command)}<br>
+                <pre class="mt-1 mb-0" style="font-size:12px;">${escapeHtml(co.output || '')}</pre>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+      `;
+      qs('#verifyResults').prepend(card);
+    });
+  } catch (err) {
+    qs('#verifyResults').innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(err.message)}</div>`;
+  } finally {
+    hideSpinner('asisSpinner');
+  }
+}
+
+// Download Verify PDF handler
+qs('#verifyDownloadPdfBtn')?.addEventListener('click', async () => {
+  if (!lastVerifyResults) {
+    alert('No results to download');
+    return;
+  }
+  
+  try {
+    const res = await fetch('/download_verify_summary', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        results: lastVerifyResults,
+        prompt: lastVerifyPrompt,
+        is_asis: lastIsAsis
+      })
+    });
+    
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(errorData.error || 'PDF generation failed');
+    }
+    
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `verification_summary_${new Date().getTime()}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    
+    // Show success message
+    const successMsg = document.createElement('div');
+    successMsg.className = 'alert alert-success alert-dismissible fade show mt-2';
+    successMsg.innerHTML = `
+       PDF downloaded successfully!
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    qs('#verifyResults').prepend(successMsg);
+    setTimeout(() => successMsg.remove(), 3000);
+    
+  } catch (err) {
+    alert('Failed to download PDF: ' + err.message);
+  }
+});
+// Add these variables at the top with other globals
+
+
+// Fetch audit logs
+
+
+// Download audit logs
+// Direct download audit report - no list display
+async function downloadAuditLogsDirectly() {
+  const devices = getSelectedDevices();
+  if (!devices.length) {
+    alert('Please select devices to generate audit report');
+    return;
+  }
+  
+  showSpinner('downloadAuditSpinner');
+  qs('#auditResults').innerHTML = '';
+  
+  try {
+    // Step 1: Show loading message
+    qs('#auditResults').innerHTML = `
+  <div class="alert alert-info" id="auditProgressAlert">
+    <i class="fas fa-spinner fa-spin me-2"></i>
+    <strong>Generating comprehensive audit report...</strong>
+    <br><small>Collecting data from ${devices.length} device(s). This may take a moment.</small>
+    <div class="progress mt-3" style="height: 25px;">
+      <div class="progress-bar progress-bar-striped progress-bar-animated" 
+           id="auditProgressBar" 
+           role="progressbar" 
+           style="width: 0%;" 
+           aria-valuenow="0" 
+           aria-valuemin="0" 
+           aria-valuemax="100">
+        0%
+      </div>
+    </div>
+  </div>
+`;
+
+// Simulate progress updates
+let progress = 0;
+const progressInterval = setInterval(() => {
+  progress += Math.random() * 15;
+  if (progress > 90) progress = 90;
+  updateAuditProgress(progress);
+}, 500);
+    
+    // Step 2: Fetch audit logs silently
+    const res = await fetch('/get_audit_logs', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ devices })
+    });
+    const data = await res.json();
+    clearInterval(progressInterval);
+    updateAuditProgress(95);
+
+    
+    if (data.error) {
+      qs('#auditResults').innerHTML = `
+        <div class="alert alert-danger alert-dismissible fade show">
+          <strong>Error:</strong> ${escapeHtml(data.error)}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      `;
+      return;
+    }
+    
+    // Step 3: Generate and download the report
+    const downloadRes = await fetch('/download_audit_logs', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ audit_data: data })
+    });
+    
+    if (!downloadRes.ok) {
+      const errorData = await downloadRes.json();
+      throw new Error(errorData.error || 'Download failed');
+    }
+    
+    // Get file metadata
+    const filePath = downloadRes.headers.get('X-Audit-File-Path');
+    const fileSize = downloadRes.headers.get('X-Audit-File-Size');
+    
+    // Step 4: Download the file automatically
+    const blob = await downloadRes.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    
+    // Extract filename
+    const contentDisposition = downloadRes.headers.get('Content-Disposition');
+    let filename = 'device_audit_report.cfg';
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+      if (filenameMatch) filename = filenameMatch[1];
+    }
+    
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    // Complete progress
+    updateAuditProgress(100);
+
+    // Show completion popup
+    setTimeout(() => {
+      showAuditCompletionModal(filename, successCount, devices.length, totalEntries, fileSize);
+    }, 300);
+
+    
+    // Step 5: Show simple success message only
+    const results = data.results || [];
+    const successCount = results.filter(r => r.success).length;
+    const totalEntries = results.reduce((sum, r) => sum + (r.logs?.length || 0), 0);
+    
+    qs('#auditResults').innerHTML = `
+      <div class="alert alert-success alert-dismissible fade show">
+        <h5 class="alert-heading">
+          <i class="fas fa-check-circle me-2"></i>Audit Report Downloaded Successfully!
+        </h5>
+        <hr>
+        <p class="mb-2"><strong>Summary:</strong></p>
+        <ul class="mb-0">
+          <li>Devices Audited: <strong>${successCount} of ${devices.length}</strong></li>
+          <li>Configuration Entries: <strong>${totalEntries}</strong></li>
+          <li>Report File: <strong>${filename}</strong></li>
+          ${fileSize ? `<li>File Size: <strong>${(parseInt(fileSize) / 1024).toFixed(2)} KB</strong></li>` : ''}
+          ${filePath ? `<li>Saved Location: <code>${filePath}</code></li>` : ''}
+        </ul>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    `;
+    
+    // Auto-dismiss success message after 5 seconds
+    setTimeout(() => {
+      const alert = qs('#auditResults .alert-success');
+      if (alert) {
+        alert.classList.remove('show');
+        setTimeout(() => alert.remove(), 150);
+      }
+    }, 5000);
+    
+  } catch (err) {
+    qs('#auditResults').innerHTML = `
+      <div class="alert alert-danger alert-dismissible fade show">
+        <strong>Error:</strong> ${escapeHtml(err.message)}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    `;
+  } finally {
+    hideSpinner('downloadAuditSpinner');
+  }
+}
+// Helper function to update audit progress
+function updateAuditProgress(percent) {
+  const progressBar = qs('#auditProgressBar');
+  if (progressBar) {
+    const roundedPercent = Math.min(Math.round(percent), 100);
+    progressBar.style.width = roundedPercent + '%';
+    progressBar.setAttribute('aria-valuenow', roundedPercent);
+    progressBar.textContent = roundedPercent + '%';
+  }
+}
+
+// Show audit completion modal
+function showAuditCompletionModal(filename, successCount, totalDevices, totalEntries, fileSize) {
+  const existingModal = qs('#auditCompletionModal');
+  if (existingModal) existingModal.remove();
+  
+  const modalHTML = `
+    <div class="modal fade" id="auditCompletionModal" tabindex="-1" data-bs-backdrop="static">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white;">
+            <h5 class="modal-title">
+              <i class="fas fa-check-circle me-2"></i>Audit Report Completed!
+            </h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="text-center mb-4">
+              <i class="fas fa-check-circle" style="font-size: 64px; color: #28a745;"></i>
+              <h4 class="mt-3">Report Generated Successfully</h4>
+            </div>
+            
+            <div class="alert alert-success">
+              <h6 class="mb-3"><i class="fas fa-info-circle me-2"></i>Summary</h6>
+              <ul class="mb-0">
+                <li><strong>Devices Audited:</strong> ${successCount} of ${totalDevices}</li>
+                <li><strong>Configuration Entries:</strong> ${totalEntries}</li>
+                <li><strong>Report File:</strong> ${filename}</li>
+                ${fileSize ? `<li><strong>File Size:</strong> ${(parseInt(fileSize) / 1024).toFixed(2)} KB</li>` : ''}
+              </ul>
+            </div>
+            
+            <div class="alert alert-info mb-0">
+              <i class="fas fa-download me-2"></i>
+              The audit report has been downloaded to your device.
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-success" data-bs-dismiss="modal">
+              <i class="fas fa-check me-2"></i>OK
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+  
+  const modal = new bootstrap.Modal(qs('#auditCompletionModal'));
+  modal.show();
+  
+  qs('#auditCompletionModal').addEventListener('hidden.bs.modal', function() {
+    this.remove();
+  });
+  
+  setTimeout(() => {
+    qs('#auditResults').innerHTML = '';
+  }, 500);
+}
+
+// Add event listeners
+document.addEventListener('DOMContentLoaded', () => {
+  // ... your existing event listeners ...
+  
+  // Audit event listeners
+// Single audit button event listener
+qs('#downloadAuditBtn')?.addEventListener('click', downloadAuditLogsDirectly);
+});
+
+// 04-11-2025 restart update
+// Add this code at the END of your existing <script> tag
+
+// Refresh/Restart Application
+async function refreshApplication() {
+  if (!confirm('⚠️ This will restart the application. All users will be disconnected briefly.\n\nContinue?')) {
+    return;
+  }
+  
+  try {
+    const refreshModal = new bootstrap.Modal(document.getElementById('refreshModal'));
+    refreshModal.show();
+    
+    const res = await fetch('/restart_app', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'}
+    });
+    
+    const data = await res.json();
+    
+    if (data.success) {
+      let countdown = 10;
+      const countdownEl = document.getElementById('refreshCountdown');
+      
+      const countdownInterval = setInterval(() => {
+        countdown--;
+        countdownEl.textContent = `Refreshing in ${countdown} seconds...`;
+        
+        if (countdown <= 0) {
+          clearInterval(countdownInterval);
+          checkHealthAndReload();
+        }
+      }, 1000);
+      
+      countdownEl.textContent = `Refreshing in ${countdown} seconds...`;
+    } else {
+      alert('Failed to restart: ' + (data.error || 'Unknown error'));
+      refreshModal.hide();
+    }
+  } catch (err) {
+    alert('Failed to restart: ' + err.message);
+    const refreshModal = bootstrap.Modal.getInstance(document.getElementById('refreshModal'));
+    if (refreshModal) refreshModal.hide();
+  }
+}
+
+// Add this function after the existing functions
+async function reloadDeviceList() {
+  try {
+    const res = await fetch('/api/devices');
+    const data = await res.json();
+    
+    if (data.success) {
+      const deviceListContainer = qs('#deviceList');
+      deviceListContainer.innerHTML = '';
+      
+      data.devices.forEach((device, index) => {
+        const label = `${device.name} (${device.ip})`;
+        const item = document.createElement('label');
+        item.className = 'list-group-item';
+        item.setAttribute('data-device-item', '');
+        item.innerHTML = `
+          <div style="display:flex; align-items:center; gap:8px;">
+            <input class="form-check-input device-input" type="checkbox" name="devices" value="${label}" id="dev-${index}">
+            <div style="flex:1; margin-left:8px;">
+              <div style="font-weight:600;">${label}</div>
+              <div class="small-muted">${device.name}</div>
+            </div>
+          </div>
+        `;
+        deviceListContainer.appendChild(item);
+        
+        // Re-attach event listener
+        item.querySelector('.device-input').addEventListener('change', function() {
+          const isRadioMode = radioModePanels.includes(currentPanel);
+          
+          if (isRadioMode) {
+            updateDeviceCount();
+            if (currentPanel === 'restorePanel') {
+              if (this.checked) {
+                selectedDeviceForFiles = this.value;
+                loadBackupFiles(selectedDeviceForFiles);
+              } else {
+                selectedDeviceForFiles = '';
+                const fileList = qs('#fileList');
+                const downloadAllBtn = qs('#downloadAllBtn');
+                if (fileList) {
+                  fileList.innerHTML = '<div class="small-muted">Select a device to load files</div>';
+                }
+                if (downloadAllBtn) {
+                  downloadAllBtn.style.display = 'none';
+                }
+              }
+            }
+          } else {
+            updateDeviceCount();
+            const allCheckboxes = qsa('.device-input');
+            const checkedCheckboxes = qsa('.device-input:checked');
+            const selectAllCheckbox = qs('#selectAll');
+            if (selectAllCheckbox) {
+              selectAllCheckbox.checked = allCheckboxes.length > 0 && allCheckboxes.length === checkedCheckboxes.length;
+            }
+          }
+        });
+      });
+      
+      updateDeviceCount();
+    }
+  } catch (err) {
+    console.error('Failed to reload device list:', err);
+  }
+}
+
+// Call this when returning from device management page
+window.addEventListener('focus', () => {
+  // Check if we just came back from device management
+  const lastVisited = sessionStorage.getItem('lastVisited');
+  if (lastVisited === 'device_management') {
+    reloadDeviceList();
+    sessionStorage.removeItem('lastVisited');
+  }
+});
+
+async function checkHealthAndReload() {
+  let attempts = 0;
+  const maxAttempts = 20;
+  
+  const checkHealth = setInterval(async () => {
+    attempts++;
+    
+    try {
+      const res = await fetch('/health', { method: 'GET', cache: 'no-cache' });
+      
+      if (res.ok) {
+        clearInterval(checkHealth);
+        document.getElementById('refreshCountdown').textContent = '✓ Application restarted!';
+        setTimeout(() => window.location.reload(), 1000);
+      }
+    } catch (err) {
+      if (attempts >= maxAttempts) {
+        clearInterval(checkHealth);
+        document.getElementById('refreshCountdown').innerHTML = 
+          '❌ Please <a href="/" class="text-primary fw-bold">refresh manually</a>.';
+      }
+    }
+  }, 2000);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  // ... your existing code ...
+  
+  // Refresh button handler
+  document.getElementById('refreshAppBtn')?.addEventListener('click', refreshApplication);
+  
+  // Hamburger Menu Toggle
+  const hamburgerBtn = document.getElementById('hamburgerBtn');
+  const menuDropdown = document.getElementById('menuDropdown');
+  
+  if (hamburgerBtn && menuDropdown) {
+    hamburgerBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      menuDropdown.classList.toggle('show');
+    });
+    
+    // Close menu when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!hamburgerBtn.contains(e.target) && !menuDropdown.contains(e.target)) {
+        menuDropdown.classList.remove('show');
+      }
+    });
+    
+    // Close menu when clicking a menu item
+    document.querySelectorAll('.menu-item').forEach(item => {
+      item.addEventListener('click', () => {
+        if (item.id !== 'refreshAppBtn') {
+          menuDropdown.classList.remove('show');
+        }
+      });
+    });
+  }
+});
+
+// Mark that we visited device management
+window.addEventListener('beforeunload', () => {
+  sessionStorage.setItem('lastVisited', 'device_management');
+});
+
+</script>
+
+<div id="refreshModal" class="modal fade restart-modal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-body text-center p-5">
+        <div class="restart-spinner mx-auto mb-4"></div>
+        <h4 class="mb-3">Restarting Application</h4>
+        <p class="text-muted mb-0">Please wait while the application restarts...</p>
+        <p class="small text-muted mt-2">This page will automatically refresh when ready.</p>
+        <div id="refreshCountdown" class="mt-3 fw-bold" style="color: #667eea;"></div>
+      </div>
+    </div>
+  </div>
+</div> 
+  
+</body>
+</html>
