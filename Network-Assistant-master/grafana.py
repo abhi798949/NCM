@@ -3,7 +3,7 @@ import json
 import requests
 from dotenv import load_dotenv
 
-DEFAULT_BUCKET = os.environ.get("INFLUX_BUCKET", "SNMP")
+DEFAULT_BUCKET = os.environ.get("INFLUX_BUCKET", "vayuDB1")
 
 def _headers(api_key: str):
     return {
@@ -63,11 +63,12 @@ def create_comprehensive_dashboard(grafana_url: str, api_key: str, flux_bucket: 
                             "query": f'''
 from(bucket: "{flux_bucket}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r["_measurement"] == "ping")
-  |> filter(fn: (r) => r["device"] == "${{device}}")
-  |> filter(fn: (r) => r["_field"] == "percent_packet_loss")
+  |> filter(fn: (r) => r["_measurement"] == "device_health")
+  |> filter(fn: (r) => r["device_name"] == "${{device}}")
+  |> filter(fn: (r) => r["_field"] == "reachable")
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-  |> map(fn: (r) => ({{r with _value: if r._value == 0.0 then 1 else 0 }}))
+  |> yield(name: "mean")
+  |> distinct(column: "reachable")
   |> last()
 '''
                         }
@@ -111,25 +112,12 @@ from(bucket: "{flux_bucket}")
                             "refId": "A",
                             "datasource": {"uid": datasource_uid, "type": "influxdb"},
                             "query": f'''
-cisco_cpu = from(bucket: "{flux_bucket}")
+from(bucket: "{flux_bucket}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r["_measurement"] == "cpu")
-  |> filter(fn: (r) => r["device"] == "${{device}}")
-  |> filter(fn: (r) => r["_field"] == "cpu_1min")
+  |> filter(fn: (r) => r._measurement == "device_health")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
+  |> filter(fn: (r) => r._field == "cpu_usage")
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-  |> group(columns: ["_time"])
-  |> mean()
-  |> map(fn: (r) => ({{r with _field: "cpu_usage"}}))
-
-juniper_cpu = from(bucket: "{flux_bucket}")
-  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r["_measurement"] == "device")
-  |> filter(fn: (r) => r["device"] == "${{device}}")
-  |> filter(fn: (r) => r["_field"] == "cpu_usage")
-  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-  |> map(fn: (r) => ({{r with _field: "cpu_usage"}}))
-
-union(tables: [cisco_cpu, juniper_cpu])
   |> last()
 '''
                         }
@@ -167,29 +155,12 @@ union(tables: [cisco_cpu, juniper_cpu])
                             "refId": "A",
                             "datasource": {"uid": datasource_uid, "type": "influxdb"},
                             "query": f'''
-cisco_mem = from(bucket: "{flux_bucket}")
+from(bucket: "{flux_bucket}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r["_measurement"] == "memory")
-  |> filter(fn: (r) => r["device"] == "${{device}}")
-  |> filter(fn: (r) => r["_field"] == "mem_used" or r["_field"] == "mem_free")
+  |> filter(fn: (r) => r._measurement == "device_health")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
+  |> filter(fn: (r) => r._field == "memory_usage")
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-  |> group(columns: ["_time", "_field"])
-  |> sum()
-  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-  |> map(fn: (r) => ({{ r with _value: if exists r.mem_used and exists r.mem_free and (r.mem_used + r.mem_free) > 0 then (r.mem_used / (r.mem_used + r.mem_free)) * 100.0 else 0.0, _field: "memory_used_percent" }}))
-  |> keep(columns: ["_time", "_value", "_field", "device"])
-
-juniper_mem = from(bucket: "{flux_bucket}")
-  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r["_measurement"] == "device")
-  |> filter(fn: (r) => r["device"] == "${{device}}")
-  |> filter(fn: (r) => r["_field"] == "memory_used_raw" or r["_field"] == "memory_total_raw")
-  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-  |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-  |> map(fn: (r) => ({{ r with _value: if exists r.memory_total_raw and r.memory_total_raw > 0.0 then (r.memory_used_raw / r.memory_total_raw) * 100.0 else 0.0, _field: "memory_used_percent" }}))
-  |> keep(columns: ["_time", "_value", "_field", "device"])
-
-union(tables: [cisco_mem, juniper_mem])
   |> last()
 '''
                         }
@@ -224,25 +195,12 @@ union(tables: [cisco_mem, juniper_mem])
                             "refId": "A",
                             "datasource": {"uid": datasource_uid, "type": "influxdb"},
                             "query": f'''
-cisco_cpu = from(bucket: "{flux_bucket}")
+from(bucket: "{flux_bucket}")
   |> range(start: -24h)
-  |> filter(fn: (r) => r["_measurement"] == "cpu")
-  |> filter(fn: (r) => r["device"] == "${{device}}")
-  |> filter(fn: (r) => r["_field"] == "cpu_1min")
+  |> filter(fn: (r) => r._measurement == "device_health")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
+  |> filter(fn: (r) => r._field == "cpu_usage")
   |> aggregateWindow(every: 5m, fn: mean, createEmpty: false)
-  |> group(columns: ["_time"])
-  |> mean()
-  |> map(fn: (r) => ({{r with _field: "cpu_usage"}}))
-
-juniper_cpu = from(bucket: "{flux_bucket}")
-  |> range(start: -24h)
-  |> filter(fn: (r) => r["_measurement"] == "device")
-  |> filter(fn: (r) => r["device"] == "${{device}}")
-  |> filter(fn: (r) => r["_field"] == "cpu_usage")
-  |> aggregateWindow(every: 5m, fn: mean, createEmpty: false)
-  |> map(fn: (r) => ({{r with _field: "cpu_usage"}}))
-
-union(tables: [cisco_cpu, juniper_cpu])
 '''
                         }
                     ],
@@ -268,12 +226,13 @@ union(tables: [cisco_cpu, juniper_cpu])
                         }
                     }
                 },
-                # Row 2: Interface Bandwidth & Traffic
+                # Row 2: Interface Bandwidth
                 {
                     "id": 200,
                     "title": "Interface Bandwidth & Traffic",
                     "type": "row",
                     "gridPos": {"h": 1, "w": 24, "x": 0, "y": 7},
+                    
                     "collapsed": False
                 },
                 {
@@ -291,15 +250,30 @@ union(tables: [cisco_cpu, juniper_cpu])
                             "query": f'''
 from(bucket: "{flux_bucket}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "interfaces")
-  |> filter(fn: (r) => r.device == "${{device}}")
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
   |> filter(fn: (r) => r.ifDescr =~ /^${{interface:regex}}$/)
-  |> filter(fn: (r) => r._field == "ifHCInOctets" or r._field == "ifHCOutOctets")
-  |> pivot(rowKey: ["_time", "ifDescr"], columnKey: ["_field"], valueColumn: "_value")
-  |> derivative(unit: 1s, nonNegative: true, columns: ["ifHCInOctets", "ifHCOutOctets"])
-  |> map(fn: (r) => ({{ r with in_bps: r.ifHCInOctets * 8.0, out_bps: r.ifHCOutOctets * 8.0 }}))
-  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false, columns: ["in_bps", "out_bps"])
-  |> keep(columns: ["_time", "in_bps", "out_bps", "ifDescr"])
+  |> filter(fn: (r) => r.metric == "ifHCInOctets")
+  |> filter(fn: (r) => r._field == "value")
+  |> derivative(unit: 1s, nonNegative: true)
+  |> map(fn: (r) => ({{ r with _value: r._value * 8.0 }}))
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+'''
+                        },
+                        {
+                            "refId": "B",
+                            "datasource": {"uid": datasource_uid, "type": "influxdb"},
+                            "query": f'''
+from(bucket: "{flux_bucket}")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
+  |> filter(fn: (r) => r.ifDescr =~ /^${{interface:regex}}$/)
+  |> filter(fn: (r) => r.metric == "ifHCOutOctets")
+  |> filter(fn: (r) => r._field == "value")
+  |> derivative(unit: 1s, nonNegative: true)
+  |> map(fn: (r) => ({{ r with _value: r._value * 8.0 * 1.0 }}))
+  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
 '''
                         }
                     ],
@@ -316,14 +290,14 @@ from(bucket: "{flux_bucket}")
                         },
                         "overrides": [
                             {
-                                "matcher": {"id": "byName", "options": "in_bps"},
+                                "matcher": {"id": "byRegexp", "options": ".*InOctets.*"},
                                 "properties": [
                                     {"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}},
                                     {"id": "displayName", "value": "Inbound - ${__field.labels.ifDescr}"}
                                 ]
                             },
                             {
-                                "matcher": {"id": "byName", "options": "out_bps"},
+                                "matcher": {"id": "byRegexp", "options": ".*OutOctets.*"},
                                 "properties": [
                                     {"id": "color", "value": {"mode": "fixed", "fixedColor": "blue"}},
                                     {"id": "displayName", "value": "Outbound - ${__field.labels.ifDescr}"}
@@ -349,16 +323,31 @@ from(bucket: "{flux_bucket}")
                             "refId": "A",
                             "datasource": {"uid": datasource_uid, "type": "influxdb"},
                             "query": f'''
-from(bucket: "{flux_bucket}")
+// Get interface speed
+ifSpeed = from(bucket: "{flux_bucket}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "interfaces")
-  |> filter(fn: (r) => r.device == "${{device}}")
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
   |> filter(fn: (r) => r.ifDescr =~ /^${{interface:regex}}$/)
-  |> filter(fn: (r) => r._field == "ifHCInOctets" or r._field == "ifHighSpeed")
-  |> pivot(rowKey: ["_time", "ifDescr"], columnKey: ["_field"], valueColumn: "_value")
-  |> filter(fn: (r) => exists r.ifHCInOctets and exists r.ifHighSpeed)
-  |> derivative(unit: 1s, nonNegative: true, columns: ["ifHCInOctets"])
-  |> map(fn: (r) => ({{ r with _value: (r.ifHCInOctets * 8.0 / (r.ifHighSpeed * 1000000.0)) * 100.0 }}))
+  |> filter(fn: (r) => r.metric == "ifHCInOctets")
+  |> filter(fn: (r) => r._field == "value")
+  |> last()
+  |> map(fn: (r) => ({{ r with _value: float(v: r.ifHighSpeed) }}))
+  |> keep(columns: ["_value", "ifDescr", "device_name"])
+
+// Get inbound traffic and calculate utilization
+inTraffic = from(bucket: "{flux_bucket}")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
+  |> filter(fn: (r) => r.ifDescr =~ /^${{interface:regex}}$/)
+  |> filter(fn: (r) => r.metric == "ifHCInOctets")
+  |> filter(fn: (r) => r._field == "value")
+  |> derivative(unit: 1s, nonNegative: true)
+  |> map(fn: (r) => ({{ r with _value: r._value * 8.0 }}))
+
+join(tables: {{in: inTraffic, speed: ifSpeed}}, on: ["ifDescr", "device_name"])
+  |> map(fn: (r) => ({{ r with _value: (r._value_in / r._value_speed) * 100.0 }}))
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
 '''
                         },
@@ -366,16 +355,31 @@ from(bucket: "{flux_bucket}")
                             "refId": "B",
                             "datasource": {"uid": datasource_uid, "type": "influxdb"},
                             "query": f'''
-from(bucket: "{flux_bucket}")
+// Get interface speed
+ifSpeed = from(bucket: "{flux_bucket}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "interfaces")
-  |> filter(fn: (r) => r.device == "${{device}}")
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
   |> filter(fn: (r) => r.ifDescr =~ /^${{interface:regex}}$/)
-  |> filter(fn: (r) => r._field == "ifHCOutOctets" or r._field == "ifHighSpeed")
-  |> pivot(rowKey: ["_time", "ifDescr"], columnKey: ["_field"], valueColumn: "_value")
-  |> filter(fn: (r) => exists r.ifHCOutOctets and exists r.ifHighSpeed)
-  |> derivative(unit: 1s, nonNegative: true, columns: ["ifHCOutOctets"])
-  |> map(fn: (r) => ({{ r with _value: (r.ifHCOutOctets * 8.0 / (r.ifHighSpeed * 1000000.0)) * 100.0 }}))
+  |> filter(fn: (r) => r.metric == "ifHCOutOctets")
+  |> filter(fn: (r) => r._field == "value")
+  |> last()
+  |> map(fn: (r) => ({{ r with _value: float(v: r.ifHighSpeed) }}))
+  |> keep(columns: ["_value", "ifDescr", "device_name"])
+
+// Get outbound traffic and calculate utilization
+outTraffic = from(bucket: "{flux_bucket}")
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
+  |> filter(fn: (r) => r.ifDescr =~ /^${{interface:regex}}$/)
+  |> filter(fn: (r) => r.metric == "ifHCOutOctets")
+  |> filter(fn: (r) => r._field == "value")
+  |> derivative(unit: 1s, nonNegative: true)
+  |> map(fn: (r) => ({{ r with _value: r._value * 8.0 }}))
+
+join(tables: {{out: outTraffic, speed: ifSpeed}}, on: ["ifDescr", "device_name"])
+  |> map(fn: (r) => ({{ r with _value: (r._value_out / r._value_speed) * 100.0 }}))
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
 '''
                         }
@@ -422,17 +426,20 @@ from(bucket: "{flux_bucket}")
                         "legend": {"displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "last"]}
                     }
                 },
-                # Row 3: Interface Errors & Discards
+                # Row 3: Interface Packets & Errors
                 {
                     "id": 300,
-                    "title": "Interface Errors & Discards",
+                    "title": "Interface Packets & Errors",
                     "type": "row",
                     "gridPos": {"h": 1, "w": 24, "x": 0, "y": 16},
+                    "repeat": "interface",
+                    "repeatDirection": "h",
+                    "maxPerRow": 4,
                     "collapsed": False
                 },
                 {
                     "id": 7,
-                    "title": "Interface Errors Rate",
+                    "title": "Packet Rate (pps)",
                     "type": "timeseries",
                     "gridPos": {"h": 8, "w": 12, "x": 0, "y": 17},
                     "repeat": "interface",
@@ -445,12 +452,13 @@ from(bucket: "{flux_bucket}")
                             "query": f'''
 from(bucket: "{flux_bucket}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "interfaces")
-  |> filter(fn: (r) => r.device == "${{device}}")
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
   |> filter(fn: (r) => r.ifDescr =~ /^${{interface:regex}}$/)
-  |> filter(fn: (r) => r._field == "ifInErrors")
+  |> filter(fn: (r) => r.metric == "ifInUcastPkts" or r.metric == "ifInNUcastPkts")
+  |> filter(fn: (r) => r._field == "value")
   |> derivative(unit: 1s, nonNegative: true)
-  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> aggregateWindow(every: v.windowPeriod, fn: sum, createEmpty: false)
 '''
                         },
                         {
@@ -459,12 +467,14 @@ from(bucket: "{flux_bucket}")
                             "query": f'''
 from(bucket: "{flux_bucket}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "interfaces")
-  |> filter(fn: (r) => r.device == "${{device}}")
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
   |> filter(fn: (r) => r.ifDescr =~ /^${{interface:regex}}$/)
-  |> filter(fn: (r) => r._field == "ifOutErrors")
+  |> filter(fn: (r) => r.metric == "ifOutUcastPkts" or r.metric == "ifOutNUcastPkts")
+  |> filter(fn: (r) => r._field == "value")
   |> derivative(unit: 1s, nonNegative: true)
-  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> map(fn: (r) => ({{ r with _value: r._value * 1.0 }}))
+  |> aggregateWindow(every: v.windowPeriod, fn: sum, createEmpty: false)
 '''
                         }
                     ],
@@ -474,43 +484,34 @@ from(bucket: "{flux_bucket}")
                             "custom": {
                                 "drawStyle": "line",
                                 "lineWidth": 1,
-                                "fillOpacity": 10,
-                                "gradientMode": "none"
-                            },
-                            "thresholds": {
-                                "mode": "absolute",
-                                "steps": [
-                                    {"color": "green", "value": None},
-                                    {"color": "yellow", "value": 1},
-                                    {"color": "red", "value": 10}
-                                ]
+                                "fillOpacity": 10
                             }
                         },
                         "overrides": [
                             {
-                                "matcher": {"id": "byRegexp", "options": ".*ifInErrors.*"},
+                                "matcher": {"id": "byFrameRefID", "options": "A"},
                                 "properties": [
-                                    {"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}},
-                                    {"id": "displayName", "value": "In Errors - ${__field.labels.ifDescr}"}
+                                    {"id": "displayName", "value": "In Packets - ${__field.labels.ifDescr}"},
+                                    {"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}}
                                 ]
                             },
                             {
-                                "matcher": {"id": "byRegexp", "options": ".*ifOutErrors.*"},
+                                "matcher": {"id": "byFrameRefID", "options": "B"},
                                 "properties": [
-                                    {"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}},
-                                    {"id": "displayName", "value": "Out Errors - ${__field.labels.ifDescr}"}
+                                    {"id": "displayName", "value": "Out Packets - ${__field.labels.ifDescr}"},
+                                    {"id": "color", "value": {"mode": "fixed", "fixedColor": "blue"}}
                                 ]
                             }
                         ]
                     },
                     "options": {
                         "tooltip": {"mode": "multi"},
-                        "legend": {"displayMode": "table", "placement": "bottom", "calcs": ["mean", "sum", "last"]}
+                        "legend": {"displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "last"]}
                     }
                 },
                 {
                     "id": 8,
-                    "title": "Interface Discards Rate",
+                    "title": "Interface Errors & Discards",
                     "type": "timeseries",
                     "gridPos": {"h": 8, "w": 12, "x": 12, "y": 17},
                     "repeat": "interface",
@@ -523,10 +524,11 @@ from(bucket: "{flux_bucket}")
                             "query": f'''
 from(bucket: "{flux_bucket}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "interfaces")
-  |> filter(fn: (r) => r.device == "${{device}}")
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
   |> filter(fn: (r) => r.ifDescr =~ /^${{interface:regex}}$/)
-  |> filter(fn: (r) => r._field == "ifInDiscards")
+  |> filter(fn: (r) => r.metric == "ifInErrors" or r.metric == "ifInDiscards")
+  |> filter(fn: (r) => r._field == "value")
   |> derivative(unit: 1s, nonNegative: true)
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
 '''
@@ -537,10 +539,11 @@ from(bucket: "{flux_bucket}")
                             "query": f'''
 from(bucket: "{flux_bucket}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "interfaces")
-  |> filter(fn: (r) => r.device == "${{device}}")
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
   |> filter(fn: (r) => r.ifDescr =~ /^${{interface:regex}}$/)
-  |> filter(fn: (r) => r._field == "ifOutDiscards")
+  |> filter(fn: (r) => r.metric == "ifOutErrors" or r.metric == "ifOutDiscards")
+  |> filter(fn: (r) => r._field == "value")
   |> derivative(unit: 1s, nonNegative: true)
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
 '''
@@ -548,72 +551,178 @@ from(bucket: "{flux_bucket}")
                     ],
                     "fieldConfig": {
                         "defaults": {
-                            "unit": "pps",
+                            "unit": "errors/sec",
                             "custom": {
                                 "drawStyle": "line",
-                                "lineWidth": 1,
-                                "fillOpacity": 10,
-                                "gradientMode": "none"
+                                "lineWidth": 2,
+                                "fillOpacity": 0
                             },
-                            "thresholds": {
-                                "mode": "absolute",
-                                "steps": [
-                                    {"color": "green", "value": None},
-                                    {"color": "yellow", "value": 1},
-                                    {"color": "red", "value": 10}
-                                ]
-                            }
+                            "color": {"mode": "palette-classic"}
                         },
                         "overrides": [
                             {
-                                "matcher": {"id": "byRegexp", "options": ".*ifInDiscards.*"},
+                                "matcher": {"id": "byRegexp", "options": ".*Errors.*"},
                                 "properties": [
-                                    {"id": "color", "value": {"mode": "fixed", "fixedColor": "purple"}},
-                                    {"id": "displayName", "value": "In Discards - ${__field.labels.ifDescr}"}
+                                    {"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}
                                 ]
                             },
                             {
-                                "matcher": {"id": "byRegexp", "options": ".*ifOutDiscards.*"},
+                                "matcher": {"id": "byRegexp", "options": ".*Discards.*"},
                                 "properties": [
-                                    {"id": "color", "value": {"mode": "fixed", "fixedColor": "dark-purple"}},
-                                    {"id": "displayName", "value": "Out Discards - ${__field.labels.ifDescr}"}
+                                    {"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}
                                 ]
                             }
                         ]
                     },
                     "options": {
                         "tooltip": {"mode": "multi"},
-                        "legend": {"displayMode": "table", "placement": "bottom", "calcs": ["mean", "sum", "last"]}
+                        "legend": {"displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "last"]}
                     }
                 },
-                # Row 4: Interface Status
+                # Row 4: Interface Status Table
                 {
                     "id": 400,
-                    "title": "Interface Status",
+                    "title": "Interface Status & Configuration",
                     "type": "row",
                     "gridPos": {"h": 1, "w": 24, "x": 0, "y": 25},
+                    "repeat": "interface",
+                    "repeatDirection": "h",
+                    "maxPerRow": 4,
                     "collapsed": False
                 },
                 {
                     "id": 9,
-                    "title": "Interface Status Overview",
+                    "title": "Interface Status Table",
                     "type": "table",
-                    "gridPos": {"h": 10, "w": 24, "x": 0, "y": 26},
+                    "gridPos": {"h": 8, "w": 24, "x": 0, "y": 26},
+                    "repeat": "interface",
+                    "repeatDirection": "h",
+                    "maxPerRow": 4,
                     "targets": [
                         {
                             "refId": "A",
                             "datasource": {"uid": datasource_uid, "type": "influxdb"},
                             "query": f'''
 from(bucket: "{flux_bucket}")
-  |> range(start: -1h)
-  |> filter(fn: (r) => r._measurement == "interfaces")
-  |> filter(fn: (r) => r.device == "${{device}}")
-  |> group(columns: ["ifDescr"])
+  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
+  |> filter(fn: (r) => r.ifDescr =~ /^${{interface:regex}}$/)
+  |> filter(fn: (r) => r.metric == "ifOperStatus" or r.metric == "ifAdminStatus" or r.metric == "ifHighSpeed" or r.metric == "ifType")
+  |> filter(fn: (r) => r._field == "value")
   |> last()
-  |> keep(columns: ["_time", "ifDescr", "ifOperStatus", "ifAdminStatus", "ifHighSpeed"])
-  |> map(fn: (r) => ({{r with operStatus: if r.ifOperStatus == 1 then "Up" else if r.ifOperStatus == 2 then "Down" else string(v: r.ifOperStatus)}}))
-  |> map(fn: (r) => ({{r with adminStatus: if r.ifAdminStatus == 1 then "Up" else if r.ifAdminStatus == 2 then "Down" else string(v: r.ifAdminStatus)}}))
+  |> keep(columns: ["_time", "ifDescr", "metric", "_value"])
+  |> pivot(rowKey: ["ifDescr"], columnKey: ["metric"], valueColumn: "_value")
 '''
+                        }
+                    ],
+                    "fieldConfig": {
+                        "defaults": {},
+                        "overrides": [
+                            {
+                                "matcher": {"id": "byName", "options": "ifOperStatus"},
+                                "properties": [
+                                    {"id": "displayName", "value": "Operational Status"},
+                                    {"id": "mappings", "value": [
+                                        {
+                                            "type": "value",
+                                            "options": {
+                                                "1": {"text": "Up", "color": "green"},
+                                                "2": {"text": "Down", "color": "red"},
+                                                "3": {"text": "Testing", "color": "yellow"},
+                                                "4": {"text": "Unknown", "color": "gray"},
+                                                "5": {"text": "Dormant", "color": "orange"},
+                                                "6": {"text": "NotPresent", "color": "gray"},
+                                                "7": {"text": "LowerLayerDown", "color": "red"}
+                                            }
+                                        }
+                                    ]},
+                                    {"id": "custom.cellOptions", "value": {"type": "color-background"}}
+                                ]
+                            },
+                            {
+                                "matcher": {"id": "byName", "options": "ifAdminStatus"},
+                                "properties": [
+                                    {"id": "displayName", "value": "Admin Status"},
+                                    {"id": "mappings", "value": [
+                                        {
+                                            "type": "value",
+                                            "options": {
+                                                "1": {"text": "Up", "color": "green"},
+                                                "2": {"text": "Down", "color": "red"},
+                                                "3": {"text": "Testing", "color": "yellow"}
+                                            }
+                                        }
+                                    ]},
+                                    {"id": "custom.cellOptions", "value": {"type": "color-background"}}
+                                ]
+                            },
+                            {
+                                "matcher": {"id": "byName", "options": "ifHighSpeed"},
+                                "properties": [
+                                    {"id": "displayName", "value": "Speed (Mbps)"},
+                                    {"id": "unit", "value": "Mbits"}
+                                ]
+                            },
+                            {
+                                "matcher": {"id": "byName", "options": "ifDescr"},
+                                "properties": [
+                                    {"id": "displayName", "value": "Interface"}
+                                ]
+                            }
+                        ]
+                    },
+                    "options": {
+                        "showHeader": True,
+                        "sortBy": [{"displayName": "Interface", "desc": False}]
+                    },
+                    "transformations": [
+                        {
+                            "id": "organize",
+                            "options": {
+                                "excludeByName": {
+                                    "_start": True,
+                                    "_stop": True,
+                                    "_time": True,
+                                    "device_name": True,
+                                    "host": True
+                                },
+                                "indexByName": {
+                                    "ifDescr": 0,
+                                    "ifOperStatus": 1,
+                                    "ifAdminStatus": 2,
+                                    "ifHighSpeed": 3,
+                                    "ifType": 4
+                                }
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": 500,
+                    "title": "RIB Entries (Routes)",
+                    "type": "row",
+                    "gridPos": {"h": 1, "w": 24, "x": 0, "y": 20},  # Adjust y based on existing panels
+                    "collapsed": False
+                },
+                {
+                    "id": 10,
+                    "title": "Current RIB Routes",
+                    "type": "table",  # Table panel for routes
+                    "gridPos": {"h": 10, "w": 24, "x": 0, "y": 21},  # Adjust y
+                    "targets": [
+                        {
+                            "refId": "A",
+                            "datasource": {"uid": datasource_uid, "type": "influxdb"},
+                            "query": f'''
+                from(bucket: "{flux_bucket}")
+                |> range(start: -1h)  // Last hour; adjust as needed
+                |> filter(fn: (r) => r._measurement == "rib_entries")
+                |> filter(fn: (r) => r.device_name == "${{device}}")
+                |> group(columns: ["prefix"])  // Group by prefix to avoid duplicates
+                |> last()  // Get latest entries
+                |> keep(columns: ["_time", "prefix", "device_name"])  // Add more columns if you parsed more fields
+                '''
                         }
                     ],
                     "fieldConfig": {
@@ -625,26 +734,14 @@ from(bucket: "{flux_bucket}")
                         },
                         "overrides": [
                             {
-                                "matcher": {"id": "byName", "options": "ifDescr"},
-                                "properties": [{"id": "displayName", "value": "Interface"}]
-                            },
-                            {
-                                "matcher": {"id": "byName", "options": "operStatus"},
-                                "properties": [{"id": "displayName", "value": "Oper Status"}]
-                            },
-                            {
-                                "matcher": {"id": "byName", "options": "adminStatus"},
-                                "properties": [{"id": "displayName", "value": "Admin Status"}]
-                            },
-                            {
-                                "matcher": {"id": "byName", "options": "ifHighSpeed"},
-                                "properties": [{"id": "displayName", "value": "Speed (Mbps)"}, {"id": "unit", "value": "bps"}]
+                                "matcher": {"id": "byName", "options": "prefix"},
+                                "properties": [{"id": "displayName", "value": "Route Prefix"}]
                             }
                         ]
                     },
                     "options": {
                         "showHeader": True,
-                        "sortBy": [{"displayName": "Interface", "desc": False}]
+                        "sortBy": [{"displayName": "Route Prefix", "desc": False}]
                     }
                 }
             ],
@@ -664,8 +761,8 @@ from(bucket: "{flux_bucket}")
 import "influxdata/influxdb/schema"
 schema.tagValues(
   bucket: "{flux_bucket}",
-  tag: "device",
-  predicate: (r) => r._measurement == "device" or r._measurement == "cpu",
+  tag: "device_name",
+  predicate: (r) => r._measurement == "device_health",
   start: -24h
 )
 ''',
@@ -688,7 +785,7 @@ import "influxdata/influxdb/schema"
 schema.tagValues(
   bucket: "{flux_bucket}",
   tag: "ifDescr",
-  predicate: (r) => r._measurement == "interfaces" and r.device == "${{device}}",
+  predicate: (r) => r._measurement == "snmp_data" and r.device_name == "${{device}}",
   start: -24h
 )
 ''',
@@ -747,39 +844,47 @@ def create_interface_summary_dashboard(grafana_url: str, api_key: str, flux_buck
                             "refId": "A",
                             "datasource": {"uid": datasource_uid, "type": "influxdb"},
                             "query": f'''
-from(bucket: "{flux_bucket}")
+// Get interface speed
+traffic = from(bucket: "{flux_bucket}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "interfaces")
-  |> filter(fn: (r) => r.device == "${{device}}")
-  |> filter(fn: (r) => r._field == "ifHCInOctets" or r._field == "ifHighSpeed" or r._field == "ifOperStatus")
-  |> pivot(rowKey: ["_time", "ifDescr"], columnKey: ["_field"], valueColumn: "_value")
-  |> filter(fn: (r) => r.ifOperStatus == 1)
-  |> derivative(unit: 1s, nonNegative: true, columns: ["ifHCInOctets"])
-  |> map(fn: (r) => ({{ r with _value: (r.ifHCInOctets * 8.0 / (r.ifHighSpeed * 1000000.0)) * 100.0, metric: "In Utilization" }}))
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
+  |> filter(fn: (r) => r.metric == "ifHCInOctets")
+  |> filter(fn: (r) => r._field == "value")
+  |> filter(fn: (r) => r.ifOperStatus == "1") // Only include interfaces that are up
+  |> derivative(unit: 1s, nonNegative: true)
+  |> map(fn: (r) => ({{ r with _value: r._value * 8.0 / float(v: r.ifHighSpeed) * 100.0, metric: "In Utilization" }}))
+
+// Aggregate by interface and get max utilization
+traffic
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-  |> group(columns: ["ifDescr", "device", "metric"])
+  |> group(columns: ["ifDescr", "device_name", "metric"])
   |> max()
   |> group()
   |> sort(columns: ["_value"], desc: true)
   |> limit(n: 10)
   |> map(fn: (r) => ({{ r with _value: r._value, _field: r.metric, ifDescr: r.ifDescr }}))
 '''
-                        },
-                        {
-                            "refId": "B",
-                            "datasource": {"uid": datasource_uid, "type": "influxdb"},
-                            "query": f'''
-from(bucket: "{flux_bucket}")
+        },
+        {
+            "refId": "B",
+            "datasource": {"uid": datasource_uid, "type": "influxdb"},
+            "query": f'''
+// Get outbound traffic with speed from tag (already in bps)
+traffic = from(bucket: "{flux_bucket}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "interfaces")
-  |> filter(fn: (r) => r.device == "${{device}}")
-  |> filter(fn: (r) => r._field == "ifHCOutOctets" or r._field == "ifHighSpeed" or r._field == "ifOperStatus")
-  |> pivot(rowKey: ["_time", "ifDescr"], columnKey: ["_field"], valueColumn: "_value")
-  |> filter(fn: (r) => r.ifOperStatus == 1)
-  |> derivative(unit: 1s, nonNegative: true, columns: ["ifHCOutOctets"])
-  |> map(fn: (r) => ({{ r with _value: (r.ifHCOutOctets * 8.0 / (r.ifHighSpeed * 1000000.0)) * 100.0, metric: "Out Utilization" }}))
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
+  |> filter(fn: (r) => r.metric == "ifHCOutOctets")
+  |> filter(fn: (r) => r._field == "value")
+  |> filter(fn: (r) => r.ifOperStatus == "1") // Only include interfaces that are up
+  |> derivative(unit: 1s, nonNegative: true)
+  |> map(fn: (r) => ({{ r with _value: r._value * 8.0 / float(v: r.ifHighSpeed) * 100.0, metric: "Out Utilization" }}))
+
+// Aggregate by interface and get max utilization
+traffic
   |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
-  |> group(columns: ["ifDescr", "device", "metric"])
+  |> group(columns: ["ifDescr", "device_name", "metric"])
   |> max()
   |> group()
   |> sort(columns: ["_value"], desc: true)
@@ -841,10 +946,10 @@ from(bucket: "{flux_bucket}")
                             "query": f'''
 from(bucket: "{flux_bucket}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "interfaces")
-  |> filter(fn: (r) => r.device == "${{device}}")
-  |> filter(fn: (r) => r.ifDescr =~ /^${{interface:regex}}$/)
-  |> filter(fn: (r) => r._field == "ifOperStatus")
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
+  |> filter(fn: (r) => r.metric == "ifOperStatus")
+  |> filter(fn: (r) => r._field == "value")
   |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)
 '''
                         }
@@ -872,7 +977,7 @@ from(bucket: "{flux_bucket}")
                 {
                     "id": 3,
                     "title": "Total Network Bandwidth (All Interfaces)",
-                    "type": "timeseries",
+                    "type": "BarGauge",
                     "gridPos": {"h": 8, "w": 24, "x": 0, "y": 10},
                     "repeat": "interface",
                     "repeatDirection": "h",
@@ -884,12 +989,13 @@ from(bucket: "{flux_bucket}")
                             "query": f'''
 from(bucket: "{flux_bucket}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "interfaces")
-  |> filter(fn: (r) => r.device == "${{device}}")
-  |> filter(fn: (r) => r._field == "ifHCInOctets")
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
+  |> filter(fn: (r) => r.metric == "ifHCInOctets")
+  |> filter(fn: (r) => r._field == "value")
   |> derivative(unit: 1s, nonNegative: true)
-  |> map(fn: (r) => ({{ r with _value: r._value * 8.0 }}))
-  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> map(fn: (r) => ({{ r with _value: (r._value * 8.0) / 1000000.0 }})) // Convert to bps
+  |> aggregateWindow(every: v.windowPeriod, fn: sum, createEmpty: false)
   |> group()
   |> sum()
 '''
@@ -900,12 +1006,13 @@ from(bucket: "{flux_bucket}")
                             "query": f'''
 from(bucket: "{flux_bucket}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "interfaces")
-  |> filter(fn: (r) => r.device == "${{device}}")
-  |> filter(fn: (r) => r._field == "ifHCOutOctets")
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
+  |> filter(fn: (r) => r.metric == "ifHCOutOctets")
+  |> filter(fn: (r) => r._field == "value")
   |> derivative(unit: 1s, nonNegative: true)
-  |> map(fn: (r) => ({{ r with _value: r._value * 8.0 }}))
-  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+  |> map(fn: (r) => ({{ r with _value: (r._value * 8.0 * 1.0) / 1000000.0 }})) // Convert to bps and make negative for outbound
+  |> aggregateWindow(every: v.windowPeriod, fn: sum, createEmpty: false)
   |> group()
   |> sum()
 '''
@@ -959,11 +1066,13 @@ from(bucket: "{flux_bucket}")
                             "query": f'''
 from(bucket: "{flux_bucket}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "interfaces")
-  |> filter(fn: (r) => r.device == "${{device}}")
-  |> filter(fn: (r) => r._field == "ifInErrors" or r._field == "ifOutErrors")
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
+  |> filter(fn: (r) => r.metric == "ifInErrors" or r.metric == "ifOutErrors")
+  |> filter(fn: (r) => r._field == "value")
   |> group()
   |> sum()
+  |> map(fn: (r) => ({{ r with _value: r._value }}))
 '''
                         },
                         {
@@ -972,9 +1081,10 @@ from(bucket: "{flux_bucket}")
                             "query": f'''
 from(bucket: "{flux_bucket}")
   |> range(start: v.timeRangeStart, stop: v.timeRangeStop)
-  |> filter(fn: (r) => r._measurement == "interfaces")
-  |> filter(fn: (r) => r.device == "${{device}}")
-  |> filter(fn: (r) => r._field == "ifInDiscards" or r._field == "ifOutDiscards")
+  |> filter(fn: (r) => r._measurement == "snmp_data")
+  |> filter(fn: (r) => r.device_name == "${{device}}")
+  |> filter(fn: (r) => r.metric == "ifInDiscards" or r.metric == "ifOutDiscards")
+  |> filter(fn: (r) => r._field == "value")
   |> group()
   |> sum()
 '''
@@ -1030,8 +1140,8 @@ from(bucket: "{flux_bucket}")
 import "influxdata/influxdb/schema"
 schema.tagValues(
   bucket: "{flux_bucket}",
-  tag: "device",
-  predicate: (r) => r._measurement == "interfaces",
+  tag: "device_name",
+  predicate: (r) => r._measurement == "snmp_data",
   start: -24h
 )
 ''',
