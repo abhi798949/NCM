@@ -220,25 +220,43 @@ def ensure_influxdb_datasource(grafana_url, api_key, influx_config):
 def init_influxdb():
     """Initialize InfluxDB client and ensure bucket exists"""
     global influx_client, write_api
+    
     try:
         influx_client = InfluxDBClient(
             url=INFLUX_CONFIG['url'],
             token=INFLUX_CONFIG['token'],
-            org=INFLUX_CONFIG['org']
+            org=INFLUX_CONFIG['org'],
+            timeout=30_000  # 30 second timeout
         )
+        
+        # Test connection
+        health = influx_client.health()
+        if health.status != 'pass':
+            raise Exception(f"InfluxDB health check failed: {health.message}")
+        
         write_api = influx_client.write_api(write_options=SYNCHRONOUS)
         
         # Ensure bucket exists
         buckets_api = influx_client.buckets_api()
         bucket = buckets_api.find_bucket_by_name(INFLUX_CONFIG['bucket'])
         if not bucket:
-            buckets_api.create_bucket(bucket_name=INFLUX_CONFIG['bucket'], org=INFLUX_CONFIG['org'])
-            logging.info(f"Created InfluxDB bucket: {INFLUX_CONFIG['bucket']}")
-        logging.info("InfluxDB client initialized successfully")
+            buckets_api.create_bucket(
+                bucket_name=INFLUX_CONFIG['bucket'], 
+                org=INFLUX_CONFIG['org']
+            )
+            logging.info(f"✅ Created InfluxDB bucket: {INFLUX_CONFIG['bucket']}")
+        
+        logging.info("✅ InfluxDB client initialized successfully")
+        logging.info(f"   URL: {INFLUX_CONFIG['url']}")
+        logging.info(f"   Org: {INFLUX_CONFIG['org']}")
+        logging.info(f"   Bucket: {INFLUX_CONFIG['bucket']}")
+        return True
+        
     except Exception as e:
-        logging.error(f"Failed to initialize InfluxDB client: {e}")
+        logging.error(f"❌ Failed to initialize InfluxDB client: {e}")
         influx_client = None
         write_api = None
+        return False
 
 # Call at startup
 init_influxdb()
@@ -3530,6 +3548,180 @@ def restart_application():
 # ---------------------------
 # Error handlers
 # ---------------------------
+
+@app.route('/snmp_status', methods=['GET'])
+@login_required
+@role_manager.require_permission(Permission.VIEW_MONITORING)
+def snmp_status():
+    """
+    Get detailed SNMP monitoring status and diagnostics
+    """
+    try:
+        status = {
+            'enabled': app.snmp_monitoring_enabled,
+            'influxdb_connected': write_api is not None,
+            'influxdb_config': {
+                'url': INFLUX_CONFIG['url'],
+                'org': INFLUX_CONFIG['org'],
+                'bucket': INFLUX_CONFIG['bucket']
+            },
+            'devices_configured': len(load_devices()),
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Test InfluxDB connection
+        if influx_client:
+            try:
+                health = influx_client.health()
+                status['influxdb_health'] = {
+                    'status': health.status,
+                    'message': health.message or 'Connected',
+                    'version': health.version or 'Unknown'
+                }
+            except Exception as health_err:
+                status['influxdb_health'] = {
+                    'status': 'error',
+                    'message': str(health_err)
+                }
+        else:
+            status['influxdb_health'] = {
+                'status': 'disconnected',
+                'message': 'InfluxDB client not initialized'
+            }
+        
+        # Get recent metrics count
+        if influx_client:
+            try:
+                query_api = influx_client.query_api()
+                query = f'''
+                from(bucket: "{INFLUX_CONFIG['bucket']}")
+                  |> range(start: -5m)
+                  |> filter(fn: (r) => r._measurement == "device_health" or r._measurement == "snmp_data")
+                  |> count()
+                '''
+                result = query_api.query(query)
+                
+                total_points = 0
+                for table in result:
+                    for record in table.records:
+                        total_points += record.get_value()
+                
+                status['recent_metrics'] = {
+                    'last_5_minutes': total_points,
+                    'query_time': datetime.now().isoformat()
+                }
+            except Exception as query_err:
+                status['recent_metrics'] = {
+                    'error': str(query_err)
+                }
+        
+        # Check for active monitoring thread
+        import threading
+        active_threads = [t.name for t in threading.enumerate()]
+        status['monitoring_thread_active'] = 'SNMP-Monitor-Thread' in active_threads
+        status['active_threads'] = active_threads
+        
+        return jsonify(status)
+        
+    except Exception as e:
+        logging.error(f"SNMP status check failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/restart_snmp_monitoring', methods=['POST'])
+@login_required
+@role_manager.require_permission(Permission.MANAGE_ALERTS)
+def restart_snmp_monitoring():
+    """
+    Restart SNMP monitoring (emergency endpoint)
+    """
+    try:
+        # Mark as disabled
+        app.snmp_monitoring_enabled = False
+        
+        # Wait a moment for thread to see the flag
+        time.sleep(2)
+        
+        # Restart monitoring
+        start_snmp_monitor()
+        
+        return jsonify({
+            'success': True,
+            'message': 'SNMP monitoring restarted',
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logging.error(f"Failed to restart SNMP monitoring: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/test_snmp_device', methods=['POST'])
+@login_required
+@role_manager.require_permission(Permission.VIEW_MONITORING)
+def test_snmp_device():
+    """
+    Test SNMP collection for a single device
+    """
+    try:
+        data = request.get_json()
+        device_label = data.get('device')
+        
+        if not device_label or device_label not in device_map:
+            return jsonify({'error': 'Invalid device'}), 400
+        
+        device_info = device_map[device_label]
+        
+        if SNMPMonitor is None:
+            return jsonify({'error': 'SNMPMonitor not available'}), 500
+        
+        # Run test collection
+        monitor = SNMPMonitor()
+        
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            points = loop.run_until_complete(
+                monitor.collect_metrics(device_info)
+            )
+            
+            result = {
+                'success': True,
+                'device': device_label,
+                'points_collected': len(points),
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            if points:
+                # Show sample points
+                result['sample_points'] = [
+                    {
+                        'measurement': p.get('measurement'),
+                        'tags': p.get('tags', {}),
+                        'fields': list(p.get('fields', {}).keys()),
+                        'field_count': len(p.get('fields', {}))
+                    }
+                    for p in points[:5]
+                ]
+            
+            return jsonify(result)
+            
+        finally:
+            loop.close()
+        
+    except Exception as e:
+        logging.error(f"Test SNMP collection failed: {e}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+    
 #04-11-2025
 @app.route('/restart_app', methods=['POST'])
 @login_required
@@ -6412,18 +6604,35 @@ def test_xr_connection():
 # SNMP Metric Writer
 # -----------------------------
 def write_snmp_points(points):
+    """Write SNMP metrics to InfluxDB with error handling and retry"""
+    global write_api
+    
     if not write_api:
-        logging.warning("InfluxDB write API not available")
-        return
+        logging.warning("⚠️ InfluxDB write API not available")
+        return False
+    
+    if not points:
+        logging.debug("No points to write")
+        return True
+    
     try:
         write_api.write(
             bucket=INFLUX_CONFIG['bucket'],
             org=INFLUX_CONFIG['org'],
             record=points
         )
-        logging.info(f"Wrote {len(points)} SNMP metrics to InfluxDB")
+        logging.debug(f"✅ Wrote {len(points)} SNMP metrics to InfluxDB")
+        return True
+        
     except Exception as e:
-        logging.error(f"âŒ Failed to write SNMP metrics: {e}")
+        logging.error(f"❌ Failed to write SNMP metrics to InfluxDB: {e}")
+        
+        # Try to determine if this is a connection error
+        error_str = str(e).lower()
+        if any(term in error_str for term in ['connection', 'timeout', 'refused', 'unreachable']):
+            logging.error("🔌 InfluxDB connection issue detected, may need reconnection")
+        
+        return False
 # ---------------------------
 # Protect all routes (before_request)
 # ---------------------------
@@ -6446,6 +6655,7 @@ def require_login():
 def start_snmp_monitor():
     """
     Automatically start SNMP monitoring in a background thread when Flask starts.
+    FIXED: Better error handling, event loop management, and recovery
     """
     if SNMPMonitor is None:
         logging.warning("SNMPMonitor not available. Skipping SNMP monitoring startup.")
@@ -6458,44 +6668,136 @@ def start_snmp_monitor():
     try:
         monitor = SNMPMonitor()
         app.snmp_monitoring_enabled = True
-        logging.info(" Starting SNMP monitoring background thread...")
+        logging.info("🚀 Starting SNMP monitoring background thread...")
 
         def monitor_loop():
             import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            loop = None
+            consecutive_failures = 0
+            max_consecutive_failures = 3
+            
             while True:
                 try:
+                    # Create fresh event loop for each cycle
+                    if loop is None or loop.is_closed():
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        logging.info("✓ Created new asyncio event loop")
+                    
+                    # Load devices
                     devices = load_devices()
-                    logging.info(f"Loaded {len(devices)} devices for SNMP monitoring.")
+                    logging.info(f"📡 Loaded {len(devices)} devices for SNMP monitoring.")
+                    
                     if not devices:
-                        logging.warning("No devices found in devices.yaml.")
+                        logging.warning("⚠️ No devices found in devices.yaml.")
                         time.sleep(30)
                         continue
+                    
                     try:
-                        logging.info(f"Starting bulk collection for {len(devices)} devices...")
+                        logging.info(f"🔄 Starting bulk collection for {len(devices)} devices...")
+                        collection_start = datetime.now()
                         
                         # Pass the entire list of devices to collect_metrics_bulk
-                        all_points = loop.run_until_complete(monitor.collect_metrics_bulk(devices))
+                        all_points = loop.run_until_complete(
+                            monitor.collect_metrics_bulk(devices)
+                        )
+                        
+                        collection_duration = (datetime.now() - collection_start).total_seconds()
                         
                         if all_points:
-                            logging.info(f"Collected {len(all_points)} total SNMP metrics from {len(devices)} devices")
-                            write_snmp_points(all_points)
+                            logging.info(f"✅ Collected {len(all_points)} total SNMP metrics from {len(devices)} devices in {collection_duration:.1f}s")
+                            
+                            # Write to InfluxDB with error handling
+                            try:
+                                write_snmp_points(all_points)
+                                logging.info(f"💾 Successfully wrote {len(all_points)} points to InfluxDB")
+                                consecutive_failures = 0  # Reset failure counter
+                            except Exception as write_err:
+                                logging.error(f"❌ Failed to write to InfluxDB: {write_err}")
+                                consecutive_failures += 1
+                                
+                                # If InfluxDB writes keep failing, try to reconnect
+                                if consecutive_failures >= max_consecutive_failures:
+                                    logging.warning(f"⚠️ {consecutive_failures} consecutive InfluxDB failures, attempting reconnect...")
+                                    try:
+                                        init_influxdb()  # Reinitialize InfluxDB connection
+                                        consecutive_failures = 0
+                                    except Exception as reinit_err:
+                                        logging.error(f"❌ InfluxDB reconnect failed: {reinit_err}")
                         else:
-                            logging.warning(f"No SNMP metrics collected from any device")
+                            logging.warning(f"⚠️ No SNMP metrics collected from any device")
+                            consecutive_failures += 1
+                        
+                        # Check if we should stop due to repeated failures
+                        if consecutive_failures >= max_consecutive_failures:
+                            logging.error(f"❌ Too many consecutive failures ({consecutive_failures}), extending wait time...")
+                            time.sleep(60)  # Wait longer before retry
+                            consecutive_failures = 0  # Reset counter
+                            
+                    except asyncio.TimeoutError:
+                        logging.error("⏱️ Bulk SNMP collection timed out")
+                        consecutive_failures += 1
                     except Exception as bulk_err:
-                        logging.error(f"Bulk SNMP collection failed:{bulk_err}")
-
-                    logging.info("SNMP monitoring cycle complete. Waiting 30s...")
+                        logging.error(f"❌ Bulk SNMP collection failed: {bulk_err}")
+                        import traceback
+                        logging.error(traceback.format_exc())
+                        consecutive_failures += 1
+                    
+                    # Clean up the loop tasks to prevent memory leaks
+                    try:
+                        pending = asyncio.all_tasks(loop)
+                        for task in pending:
+                            task.cancel()
+                        if pending:
+                            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                    except Exception as cleanup_err:
+                        logging.debug(f"Loop cleanup warning: {cleanup_err}")
+                    
+                    logging.info("😴 SNMP monitoring cycle complete. Waiting 30s...")
                     time.sleep(30)
 
+                except KeyboardInterrupt:
+                    logging.info("🛑 SNMP monitoring interrupted by user")
+                    break
                 except Exception as loop_err:
-                    logging.error(f"SNMP monitor loop error: {loop_err}")
+                    logging.error(f"💥 SNMP monitor loop error: {loop_err}")
+                    import traceback
+                    logging.error(traceback.format_exc())
+                    consecutive_failures += 1
+                    
+                    # Close and recreate event loop on error
+                    try:
+                        if loop and not loop.is_closed():
+                            loop.close()
+                        loop = None
+                    except Exception as close_err:
+                        logging.debug(f"Loop close warning: {close_err}")
+                    
+                    # Wait before retry
+                    time.sleep(30)
+            
+            # Final cleanup
+            try:
+                if loop and not loop.is_closed():
+                    loop.close()
+                    logging.info("🧹 Cleaned up asyncio event loop")
+            except Exception as final_cleanup:
+                logging.debug(f"Final cleanup warning: {final_cleanup}")
 
-        threading.Thread(target=monitor_loop, daemon=True).start()
+        # Start monitoring thread with better name
+        monitor_thread = threading.Thread(
+            target=monitor_loop, 
+            daemon=True, 
+            name="SNMP-Monitor-Thread"
+        )
+        monitor_thread.start()
+        logging.info("✅ SNMP monitoring thread started successfully")
+        
     except Exception as e:
-        logging.error(f"Failed to start SNMP monitoring: {e}")
-      
+        logging.error(f"❌ Failed to start SNMP monitoring: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+
 @app.route('/download_execute_summary', methods=['POST'])
 @login_required
 def download_execute_summary():
@@ -6736,9 +7038,9 @@ def index():
     try:
         logging.debug(f"Rendering index for user: {current_user.id}, roles: {[r.value for r in current_user.roles] if current_user.roles else []}")
         logging.debug(f"Devices passed to template: {device_labels}")
-        return render_template('index.html', devices=device_labels, user=current_user.id)
+        return render_template('aa.html', devices=device_labels, user=current_user.id)
     except Exception as te:
-        logging.error(f"Jinja2 template error in index.html: {te}")
+        logging.error(f"Jinja2 template error in aa.html: {te}")
         return jsonify({'error': f"Template error: {str(te)}"}), 500
     except Exception as e:
         logging.error(f"Error rendering index: {e}")
