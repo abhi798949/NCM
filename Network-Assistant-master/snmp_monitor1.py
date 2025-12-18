@@ -24,6 +24,8 @@ class SNMPMonitor:
         self.device_semaphore = asyncio.Semaphore(max_concurrent_devices) if max_concurrent_devices else asyncio.Semaphore()
         self.interface_semaphore = asyncio.Semaphore(max_concurrent_interfaces) if max_concurrent_interfaces else asyncio.Semaphore()
 
+        self.snmp_engine = SnmpEngine()
+
         # Standard SNMP OIDs
         self.standard_oids = {
             'ifNumber': '1.3.6.1.2.1.2.1.0',
@@ -296,7 +298,7 @@ class SNMPMonitor:
         return points
     
     async def _walk_table_bulk(self, device_ip: str, community: str, base_oid: str,
-                               transport, max_rows: int = 200):
+                               transport, max_rows: int = 200, per_request_timeout: int = 15):
         """
         Walk an SNMP table using BULK operations for better performance
         Yields (oid, value) tuples
@@ -307,21 +309,30 @@ class SNMPMonitor:
             max_repetitions = 20  # Fetch 20 rows at a time
             
             while rows_collected < max_rows:
-                errorIndication, errorStatus, errorIndex, varBinds = await bulk_cmd(
-                    SnmpEngine(),
-                    CommunityData(community, mpModel=1),
-                    transport,
-                    ContextData(),
-                    0,  # non-repeaters
-                    max_repetitions,  # max-repetitions
-                    ObjectType(ObjectIdentity(current_oid)),
-                    lexicographicMode=False
-                )
-                
-                if errorIndication or errorStatus:
-                    break
-                
-                if not varBinds:
+                async def bulk_operation():
+                    errorIndication, errorStatus, errorIndex, varBinds = await bulk_cmd(
+                        self.snmp_engine, 
+                        CommunityData(community, mpModel=1),
+                        transport,
+                        ContextData(),
+                        0,  # non-repeaters
+                        max_repetitions,  # max-repetitions
+                        ObjectType(ObjectIdentity(current_oid)),
+                        lexicographicMode=False
+                    )
+                    if errorIndication or errorStatus:
+                        raise Exception(f"SNMP error: {errorIndication or errorStatus.prettyPrint()}")
+                    if not varBinds:
+                        raise Exception("Empty varBinds received")
+                    return varBinds
+
+                try:
+                    varBinds = await asyncio.wait_for(bulk_operation(), timeout=per_request_timeout)
+                except asyncio.TimeoutError:
+                    self.logger.warning(f"Bulk walk timeout for {device_ip} on {base_oid} after {per_request_timeout}s")
+                    break  # Exit walk on timeout to avoid hanging
+                except Exception as op_err:
+                    self.logger.debug(f"Bulk operation failed for {base_oid}: {op_err}")
                     break
                 
                 found_valid = False
@@ -520,30 +531,27 @@ class SNMPMonitor:
  
         return points
     
-    async def _snmp_get(self, device_ip: str, community: str, oid: str, port: int = 161):
+    async def _snmp_get(self, device_ip: str, community: str, oid: str, port: int = 161, retries=3, timeout=10):
         """Enhanced SNMP GET with FULL error logging"""
-        try:
-            transport = await UdpTransportTarget.create((device_ip, port), timeout=8, retries=3)  # ↑ Timeout/Retries
-            errorIndication, errorStatus, errorIndex, varBinds = await get_cmd(
-                SnmpEngine(),
-                CommunityData(community, mpModel=1),
-                transport,
-                ContextData(),
-                ObjectType(ObjectIdentity(oid))
-            )
-            
-            # **NEW: Detailed Logging**
-            if errorIndication:
-                self.logger.warning(f"SNMP ERR {device_ip}:{oid} - Indication: {errorIndication}")
-                return None
-            if errorStatus:
-                self.logger.warning(f"SNMP ERR {device_ip}:{oid} - Status: {errorStatus.prettyPrint()} (Index: {errorIndex})")
-                return None
-            if not varBinds:
-                self.logger.debug(f"SNMP EMPTY {device_ip}:{oid}")
-                return None
-                
-            return str(varBinds[0][1])
-        except Exception as e:
-            self.logger.error(f"SNMP EXCEPTION {device_ip}:{oid} - {e}")
-            return None
+        for attempt in range(retries):
+            try:
+                transport = await UdpTransportTarget.create((device_ip, port), timeout=timeout, retries=retries)  # ↑ Timeout/Retries
+                async def get_operation():
+                    errorIndication, errorStatus, errorIndex, varBinds = await get_cmd(
+                        self.snmp_engine,  # Reuse
+                        CommunityData(community, mpModel=1),
+                        transport,
+                        ContextData(),
+                        ObjectType(ObjectIdentity(oid))
+                    )
+                    if errorIndication or errorStatus:
+                        raise Exception(f"SNMP error: {errorIndication or errorStatus.prettyPrint()}")
+                    return str(varBinds[0][1]) if varBinds else None
+
+                return await asyncio.wait_for(get_operation(), timeout=timeout + 2)  # Extra buffer
+            except asyncio.TimeoutError:
+                self.logger.warning(f"SNMP GET timeout for {device_ip}:{oid} (attempt {attempt+1})")
+            except Exception as e:
+                self.logger.error(f"SNMP GET failed for {device_ip}:{oid} (attempt {attempt+1}): {e}")
+            await asyncio.sleep(1 * (2 ** attempt))  # Exponential backoff
+        return None
