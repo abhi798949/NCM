@@ -6651,152 +6651,56 @@ def require_login():
 # --------------------------------------------------------------
 #  GLOBAL TELEGRAF MANAGER (singleton)
 # --------------------------------------------------------------
-
 def start_snmp_monitor():
-    """
-    Automatically start SNMP monitoring in a background thread when Flask starts.
-    FIXED: Better error handling, event loop management, and recovery
-    """
     if SNMPMonitor is None:
-        logging.warning("SNMPMonitor not available. Skipping SNMP monitoring startup.")
+        logging.warning("SNMPMonitor not available. Skipping.")
         return
 
     if app.snmp_monitoring_enabled:
         logging.info("SNMP monitoring already running.")
         return
 
-    try:
-        monitor = SNMPMonitor()
-        app.snmp_monitoring_enabled = True
-        logging.info("🚀 Starting SNMP monitoring background thread...")
+    monitor = SNMPMonitor(max_concurrent_devices=10, max_concurrent_interfaces=50)  # Tune for scale
+    app.snmp_monitoring_enabled = True
 
-        def monitor_loop():
-            import asyncio
-            loop = None
-            consecutive_failures = 0
-            max_consecutive_failures = 3
-            
-            while True:
-                try:
-                    # Create fresh event loop for each cycle
-                    if loop is None or loop.is_closed():
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        logging.info("✓ Created new asyncio event loop")
-                    
-                    # Load devices
-                    devices = load_devices()
-                    logging.info(f"📡 Loaded {len(devices)} devices for SNMP monitoring.")
-                    
-                    if not devices:
-                        logging.warning("⚠️ No devices found in devices.yaml.")
-                        time.sleep(30)
-                        continue
-                    
-                    try:
-                        logging.info(f"🔄 Starting bulk collection for {len(devices)} devices...")
-                        collection_start = datetime.now()
-                        
-                        # Pass the entire list of devices to collect_metrics_bulk
-                        all_points = loop.run_until_complete(
-                            monitor.collect_metrics_bulk(devices)
-                        )
-                        
-                        collection_duration = (datetime.now() - collection_start).total_seconds()
-                        
-                        if all_points:
-                            logging.info(f"✅ Collected {len(all_points)} total SNMP metrics from {len(devices)} devices in {collection_duration:.1f}s")
-                            
-                            # Write to InfluxDB with error handling
-                            try:
-                                write_snmp_points(all_points)
-                                logging.info(f"💾 Successfully wrote {len(all_points)} points to InfluxDB")
-                                consecutive_failures = 0  # Reset failure counter
-                            except Exception as write_err:
-                                logging.error(f"❌ Failed to write to InfluxDB: {write_err}")
-                                consecutive_failures += 1
-                                
-                                # If InfluxDB writes keep failing, try to reconnect
-                                if consecutive_failures >= max_consecutive_failures:
-                                    logging.warning(f"⚠️ {consecutive_failures} consecutive InfluxDB failures, attempting reconnect...")
-                                    try:
-                                        init_influxdb()  # Reinitialize InfluxDB connection
-                                        consecutive_failures = 0
-                                    except Exception as reinit_err:
-                                        logging.error(f"❌ InfluxDB reconnect failed: {reinit_err}")
-                        else:
-                            logging.warning(f"⚠️ No SNMP metrics collected from any device")
-                            consecutive_failures += 1
-                        
-                        # Check if we should stop due to repeated failures
-                        if consecutive_failures >= max_consecutive_failures:
-                            logging.error(f"❌ Too many consecutive failures ({consecutive_failures}), extending wait time...")
-                            time.sleep(60)  # Wait longer before retry
-                            consecutive_failures = 0  # Reset counter
-                            
-                    except asyncio.TimeoutError:
-                        logging.error("⏱️ Bulk SNMP collection timed out")
-                        consecutive_failures += 1
-                    except Exception as bulk_err:
-                        logging.error(f"❌ Bulk SNMP collection failed: {bulk_err}")
-                        import traceback
-                        logging.error(traceback.format_exc())
-                        consecutive_failures += 1
-                    
-                    # Clean up the loop tasks to prevent memory leaks
-                    try:
-                        pending = asyncio.all_tasks(loop)
-                        for task in pending:
-                            task.cancel()
-                        if pending:
-                            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-                    except Exception as cleanup_err:
-                        logging.debug(f"Loop cleanup warning: {cleanup_err}")
-                    
-                    logging.info("😴 SNMP monitoring cycle complete. Waiting 30s...")
-                    time.sleep(30)
+    def monitor_loop():
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        logging.info("SNMP monitoring thread started with persistent event loop.")
 
-                except KeyboardInterrupt:
-                    logging.info("🛑 SNMP monitoring interrupted by user")
-                    break
-                except Exception as loop_err:
-                    logging.error(f"💥 SNMP monitor loop error: {loop_err}")
-                    import traceback
-                    logging.error(traceback.format_exc())
-                    consecutive_failures += 1
-                    
-                    # Close and recreate event loop on error
-                    try:
-                        if loop and not loop.is_closed():
-                            loop.close()
-                        loop = None
-                    except Exception as close_err:
-                        logging.debug(f"Loop close warning: {close_err}")
-                    
-                    # Wait before retry
-                    time.sleep(30)
-            
-            # Final cleanup
+        while True:
             try:
-                if loop and not loop.is_closed():
-                    loop.close()
-                    logging.info("🧹 Cleaned up asyncio event loop")
-            except Exception as final_cleanup:
-                logging.debug(f"Final cleanup warning: {final_cleanup}")
+                devices = load_devices()
+                snmp_devices = [d for d in devices if d.get('snmp_community') and d.get('snmp_enabled', True)]
+                if not snmp_devices:
+                    logging.warning("No SNMP-enabled devices found. Sleeping 60s.")
+                    time.sleep(60)
+                    continue
 
-        # Start monitoring thread with better name
-        monitor_thread = threading.Thread(
-            target=monitor_loop, 
-            daemon=True, 
-            name="SNMP-Monitor-Thread"
-        )
-        monitor_thread.start()
-        logging.info("✅ SNMP monitoring thread started successfully")
-        
-    except Exception as e:
-        logging.error(f"❌ Failed to start SNMP monitoring: {e}")
-        import traceback
-        logging.error(traceback.format_exc())
+                logging.info(f"Starting SNMP collection for {len(snmp_devices)} devices.")
+                all_points = []
+                for device in snmp_devices:  # Per-device to isolate failures
+                    try:
+                        points = loop.run_until_complete(monitor.collect_metrics(device))
+                        all_points.extend(points)
+                    except Exception as dev_err:
+                        logging.error(f"Failed SNMP collection for {device.get('name')}: {dev_err}")
+
+                if all_points:
+                    write_snmp_points(all_points)
+                    logging.info(f"Heartbeat: Collected and wrote {len(all_points)} points.")
+                else:
+                    logging.warning("No points collected this cycle.")
+
+                time.sleep(30)  # Adjustable interval; backoff if needed
+
+            except Exception as cycle_err:
+                logging.error(f"SNMP cycle failed: {cycle_err}", exc_info=True)
+                time.sleep(60)  # Backoff on major error
+
+    threading.Thread(target=monitor_loop, daemon=True).start()
+    logging.info("SNMP monitoring initialized.")
 
 @app.route('/download_execute_summary', methods=['POST'])
 @login_required
